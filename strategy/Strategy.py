@@ -102,3 +102,49 @@ class Strategy():
 
         return target_dir
     
+    def distance(self, pos1, pos2):
+        if len(pos1) == 3:
+            pos1 = pos1[:2]
+        if len(pos2) == 3:
+            pos2 = pos2[:2]
+        return math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1]-pos2[1])**2)
+    
+    def am_I_closest(self):
+        my_dist = self.distance(self.mypos, self.ball_abs_pos)
+        for i, teammate_pos in enumerate(self.teammate_positions):
+            if i == self.player_unum - -1:
+                continue
+            
+            teammate_dist = self.distance(teammate_pos, self.ball_abs_pos)
+            if teammate_dist < my_dist - 0.3:
+                return False
+        return True
+
+    def can_i_kick(self):
+        """Check if I'm close enough to kick the ball"""
+        KICK_DISTANCE = 0.5  # Tune this value
+        return self.distance(self.mypos, self.ball_abs_pos) < KICK_DISTANCE
+    
+    def get_closest_opponent_to_ball(self):
+        """Find the closest opponent to the ball"""
+        if not self.opponent_positions:
+            return None, float('inf')
+        
+        closest_dist = float('inf')
+        closest_opponent = None
+        
+        for opp_pos in self.opponent_positions:
+            dist = self.distance(opp_pos, self.ball_abs_pos)
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_opponent = opp_pos
+        
+        return closest_opponent, closest_dist
+    
+    def is_ball_in_my_half(self):
+        """Check if ball is in my defensive half"""
+        return self.ball_abs_pos[0] < 0
+    
+    def is_ball_dangerous(self):
+        """Check if ball is dangerously close to my goal"""
+        return self.ball_abs_pos[0] < -10
