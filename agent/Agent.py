@@ -189,24 +189,14 @@ class Agent(Base_Agent):
 
 
     def select_skill(self, strategyData):
-        """
-        Main decision function - can ONLY call move() or kickTarget()
-        
-        All intelligence is in:
-        1. Deciding WHEN to call which function
-        2. Deciding WHAT targets/parameters to pass
-        """
+        """Main decision function - called every game cycle"""
         drawer = self.world.draw
         
-        # ========================================
         # PHASE 1: Handle Special Game Modes
-        # ========================================
         if not self.is_play_on_mode(strategyData):
             return self.handle_special_game_modes(strategyData)
         
-        # ========================================
-        # PHASE 2: Formation & Role Assignment
-        # ========================================
+        # PHASE 2: Role Assignment & Formation
         formation_positions = GenerateBasicFormation()
         point_preferences = role_assignment(strategyData.teammate_positions, formation_positions)
         strategyData.my_desired_position = point_preferences[strategyData.player_unum]
@@ -214,31 +204,23 @@ class Agent(Base_Agent):
             strategyData.my_desired_position
         )
         
-        # Visualize my formation target
         drawer.line(strategyData.mypos, strategyData.my_desired_position, 2, 
-                drawer.Color.blue, f"formation_{strategyData.player_unum}")
+                   drawer.Color.blue, f"target_line_{strategyData.player_unum}")
         
-        # Move to formation if not ready
         if not strategyData.IsFormationReady(point_preferences):
-            drawer.annotation((0, 10.5), "FORMING UP", drawer.Color.yellow, "status")
-            
-            # Just call move() with formation position
-            return self.move(
+            drawer.annotation((0, 10.5), "Moving to Formation", drawer.Color.yellow, "status")
+            return self.move_with_astar(
+                strategyData,
                 target_2d=strategyData.my_desired_position,
                 orientation=strategyData.my_desired_orientation,
-                is_orientation_absolute=True,
-                avoid_obstacles=True
+                avoid_opponents=True,
+                avoid_teammates=True,
+                aggressive_mode=False
             )
         
-        # ========================================
         # PHASE 3: Play Soccer
-        # ========================================
         return self.play_soccer(strategyData)
 
-
-    # ========================================
-    # GAME MODE HANDLERS
-    # ========================================
 
     def is_play_on_mode(self, strategyData):
         """Check if we're in regular play mode"""
@@ -246,314 +228,125 @@ class Agent(Base_Agent):
 
 
     def handle_special_game_modes(self, strategyData):
-        """Handle kickoffs, kick-ins, etc. - ONLY using move() and kickTarget()"""
+        """Handle kickoffs, kick-ins, etc."""
         drawer = self.world.draw
         
         kickoff_modes = [self.world.M_KICKOFF_LEFT, self.world.M_KICKOFF_RIGHT]
         kickin_modes = [self.world.M_KICK_IN_LEFT, self.world.M_KICK_IN_RIGHT]
-        corner_modes = [self.world.M_CORNER_KICK_LEFT, self.world.M_CORNER_KICK_RIGHT]
-        goalkick_modes = [self.world.M_GOAL_KICK_LEFT, self.world.M_GOAL_KICK_RIGHT]
         
-        drawer.annotation((0, 10.5), f"Mode: {strategyData.play_mode}", 
-                        drawer.Color.orange, "status")
+        drawer.annotation((0, 10.5), f"Mode: {strategyData.play_mode}", drawer.Color.orange, "status")
         
         if strategyData.play_mode in kickoff_modes:
             return self.handle_kickoff(strategyData)
         elif strategyData.play_mode in kickin_modes:
             return self.handle_kickin(strategyData)
-        elif strategyData.play_mode in corner_modes:
-            return self.handle_corner(strategyData)
-        elif strategyData.play_mode in goalkick_modes:
-            return self.handle_goalkick(strategyData)
         else:
-            # Default: move to formation position
             return self.move(strategyData.my_desired_position)
 
 
     def handle_kickoff(self, strategyData):
-        """Kickoff - only use move() and kickTarget()"""
+        """Handle kickoff behavior"""
         if strategyData.am_i_closest_to_ball():
             if strategyData.can_i_kick():
-                # Kick toward goal
-                return self.kickTarget(strategyData, strategyData.mypos, (15, 0))
+                target = (15, 0)
+                return self.kickTarget(strategyData, strategyData.mypos, target)
             else:
-                # Move to ball
-                return self.move(
+                return self.move_with_astar(
+                    strategyData,
                     target_2d=strategyData.ball_2d,
-                    orientation=None,  # Face target
-                    avoid_obstacles=True
+                    avoid_opponents=False,
+                    aggressive_mode=True
                 )
         else:
-            # Stay in formation
             return self.move(strategyData.my_desired_position)
 
 
     def handle_kickin(self, strategyData):
-        """Kick-in - only use move() and kickTarget()"""
+        """Handle kick-in behavior"""
         if strategyData.am_i_closest_to_ball():
             if strategyData.can_i_kick():
-                # Find best pass target
-                target, _ = strategyData.get_best_pass_target()
-                
-                # Visualize
+                target, target_unum = strategyData.get_best_pass_target()
                 self.world.draw.line(strategyData.mypos, target, 3, 
-                                self.world.draw.Color.red, "kickin_target")
-                
+                                   self.world.draw.Color.red, "kickin_pass")
                 return self.kickTarget(strategyData, strategyData.mypos, target)
             else:
-                # Move to ball
-                return self.move(strategyData.ball_2d)
+                return self.move_with_astar(
+                    strategyData,
+                    target_2d=strategyData.ball_2d,
+                    avoid_opponents=False,
+                    aggressive_mode=True
+                )
         else:
             return self.move(strategyData.my_desired_position)
 
 
-    def handle_corner(self, strategyData):
-        """Corner kick"""
-        return self.handle_kickin(strategyData)
-
-
-    def handle_goalkick(self, strategyData):
-        """Goal kick"""
-        return self.handle_kickin(strategyData)
-
-
-    # ========================================
-    # MAIN GAMEPLAY LOGIC
-    # ========================================
-
     def play_soccer(self, strategyData):
-        """
-        Main gameplay - ONLY using move() and kickTarget()
-        
-        Strategy:
-        1. Closest player attacks ball
-        2. Others support in formation
-        3. All decisions are in TARGET SELECTION, not in move/kick functions
-        """
+        """Main gameplay logic during PlayOn mode"""
         drawer = self.world.draw
         
-        # Am I the attacker (closest to ball)?
         if strategyData.am_i_closest_to_ball():
             drawer.annotation(strategyData.mypos, "ATTACKER", 
                             drawer.Color.red, f"role_{strategyData.player_unum}")
             return self.be_attacker(strategyData)
-        
-        # Am I second closest? (support attacker)
-        elif strategyData.am_i_second_closest_to_ball():
-            drawer.annotation(strategyData.mypos, "SUPPORT", 
-                            drawer.Color.orange, f"role_{strategyData.player_unum}")
-            return self.be_support_attacker(strategyData)
-        
-        # Everyone else: hold formation
         else:
-            drawer.annotation(strategyData.mypos, "DEFEND", 
+            drawer.annotation(strategyData.mypos, "SUPPORT", 
                             drawer.Color.blue, f"role_{strategyData.player_unum}")
-            return self.be_defender(strategyData)
+            return self.be_supporter(strategyData)
 
 
     def be_attacker(self, strategyData):
-        """
-        I'm closest to ball - attack!
-        ONLY using move() and kickTarget()
-        """
+        """Behavior when I'm going for the ball"""
         drawer = self.world.draw
         
-        # Can I kick right now?
         if strategyData.can_i_kick():
             drawer.annotation((0, 10.5), "KICKING", drawer.Color.yellow, "status")
-            
-            # Decide: Should I shoot or pass?
-            kick_target = self.decide_kick_target(strategyData)
-            
-            # Visualize decision
-            distance = strategyData.distance(strategyData.ball_2d, kick_target)
-            if distance < 3:
-                label = f"SHORT PASS ({distance:.1f}m)"
-                color = drawer.Color.cyan
-            elif distance < 6:
-                label = f"MEDIUM PASS ({distance:.1f}m)"
-                color = drawer.Color.yellow
-            elif kick_target == (15, 0):
-                label = f"SHOOTING ({distance:.1f}m)"
-                color = drawer.Color.red
-            else:
-                label = f"LONG PASS ({distance:.1f}m)"
-                color = drawer.Color.orange
-            
-            drawer.annotation(strategyData.ball_2d, label, color, "kick_info")
-            drawer.line(strategyData.mypos, kick_target, 3, drawer.Color.red, "kick_line")
-            
-            # Execute kick with optimized distance parameter
-            return self.kickTarget(strategyData, strategyData.mypos, kick_target)
-        
+            target = self.decide_kick_target(strategyData)
+            drawer.line(strategyData.mypos, target, 3, drawer.Color.red, "kick_line")
+            return self.kickTarget(strategyData, strategyData.mypos, target)
         else:
-            # Not close enough - move to ball
             drawer.annotation((0, 10.5), "CHASING BALL", drawer.Color.yellow, "status")
-            drawer.clear("kick_info")
-            
-            # Intelligence: Choose path around opponents
-            ball_target = self.calculate_ball_approach_position(strategyData)
-            
-            # Just call move() with calculated target
-            return self.move(
-                target_2d=ball_target,
-                orientation=None,  # Will face the target
-                is_orientation_absolute=True,
-                avoid_obstacles=True,  # This enables the existing path planning
-                priority_unums=[],
-                is_aggressive=True  # Tighter paths when attacking
+            return self.move_with_astar(
+                strategyData,
+                target_2d=strategyData.ball_2d,
+                orientation=None,
+                avoid_opponents=True,
+                avoid_teammates=False,
+                aggressive_mode=True
             )
 
 
-    def be_support_attacker(self, strategyData):
-        """
-        I'm second closest - provide passing option
-        ONLY using move() and kickTarget()
-        """
-        drawer = self.world.draw
-        
-        # Position myself as a good passing option
-        support_position = self.calculate_support_position(strategyData)
-        
-        # Visualize support position
-        drawer.circle(support_position, 0.5, 2, drawer.Color.orange, False, 
-                    f"support_{strategyData.player_unum}")
-        
-        # Move to support position, facing ball
-        return self.move(
-            target_2d=support_position,
-            orientation=strategyData.ball_dir,  # Face the ball
-            is_orientation_absolute=True,
-            avoid_obstacles=True
-        )
-
-
-    def be_defender(self, strategyData):
-        """
-        I'm far from ball - defend/hold formation
-        ONLY using move() and kickTarget()
-        """
+    def be_supporter(self, strategyData):
+        """Behavior when I'm NOT going for the ball"""
         drawer = self.world.draw
         drawer.clear(f"role_{strategyData.player_unum}")
+        drawer.clear("kick_line")
         
-        # Adjust formation position based on ball location
-        defensive_position = self.calculate_defensive_position(strategyData)
-        
-        # Move to defensive position, facing ball
-        return self.move(
-            target_2d=defensive_position,
+        return self.move_with_astar(
+            strategyData,
+            target_2d=strategyData.my_desired_position,
             orientation=strategyData.ball_dir,
-            is_orientation_absolute=True,
-            avoid_obstacles=True
+            avoid_opponents=True,
+            avoid_teammates=True,
+            aggressive_mode=False
         )
 
 
-    # ========================================
-    # INTELLIGENT TARGET CALCULATION
-    # ========================================
-
     def decide_kick_target(self, strategyData):
-        """
-        Decide WHERE to kick (the intelligence!)
-        Returns target position - actual kick done by kickTarget()
-        """
-        opponent_goal = (15, 0)
-        
-        # Decision 1: Should I shoot?
+        """Decide whether to pass or shoot"""
         if strategyData.should_i_shoot():
-            return opponent_goal
-        
-        # Decision 2: Should I pass?
-        if strategyData.should_i_pass():
+            return (15, 0)
+        elif strategyData.should_i_pass():
             pass_target, pass_unum = strategyData.get_best_pass_target()
+            if pass_unum:
+                self.world.draw.annotation(
+                    pass_target, 
+                    f"PASS TO {pass_unum}", 
+                    self.world.draw.Color.cyan, 
+                    "pass_target"
+                )
             return pass_target
-        
-        # Default: shoot
-        return opponent_goal
-
-
-    def calculate_ball_approach_position(self, strategyData):
-        """
-        Calculate smart approach to ball (avoiding opponents)
-        Returns position - actual movement done by move()
-        """
-        ball_pos = strategyData.ball_2d
-        
-        # Check if opponents are blocking direct path
-        closest_opp, opp_dist = strategyData.get_closest_opponent_to_ball()
-        
-        if closest_opp is not None and opp_dist < 2.0:
-            # Opponent near ball - approach from side
-            # Calculate perpendicular offset
-            ball_to_goal = np.array([15, 0]) - np.array(ball_pos)
-            ball_to_goal_norm = ball_to_goal / np.linalg.norm(ball_to_goal)
-            
-            # Perpendicular vector (90 degrees rotated)
-            perpendicular = np.array([-ball_to_goal_norm[1], ball_to_goal_norm[0]])
-            
-            # Offset by 1 meter to the side
-            offset_target = ball_pos + perpendicular * 1.0
-            
-            return tuple(offset_target)
         else:
-            # Direct approach
-            return ball_pos
-
-
-    def calculate_support_position(self, strategyData):
-        """
-        Calculate where to position as support player
-        Returns position - actual movement done by move()
-        """
-        ball_pos = strategyData.ball_2d
-        my_pos = strategyData.mypos
-        
-        # Position ahead of ball, toward goal
-        goal_direction = np.array([15, 0]) - np.array(ball_pos)
-        goal_direction_norm = goal_direction / np.linalg.norm(goal_direction)
-        
-        # Position 3-4 meters ahead of ball
-        support_distance = 3.5
-        support_pos = ball_pos + goal_direction_norm * support_distance
-        
-        # Add slight lateral offset to avoid clustering
-        lateral_offset = 2.0 if my_pos[1] > 0 else -2.0
-        perpendicular = np.array([-goal_direction_norm[1], goal_direction_norm[0]])
-        support_pos = support_pos + perpendicular * lateral_offset
-        
-        # Clamp to field boundaries
-        support_pos[0] = np.clip(support_pos[0], -14, 14)
-        support_pos[1] = np.clip(support_pos[1], -9, 9)
-        
-        return tuple(support_pos)
-
-
-    def calculate_defensive_position(self, strategyData):
-        """
-        Calculate defensive position based on ball location
-        Returns position - actual movement done by move()
-        """
-        ball_pos = strategyData.ball_2d
-        my_formation_pos = strategyData.my_desired_position
-        
-        # If ball is dangerous (close to our goal), pull back
-        if strategyData.is_ball_dangerous():
-            # Pull formation position back toward goal
-            pull_back_factor = 0.3
-            defensive_x = my_formation_pos[0] - pull_back_factor * (15 + my_formation_pos[0])
-            
-            return (defensive_x, my_formation_pos[1])
-        
-        # If ball is in opponent half, push forward slightly
-        elif strategyData.is_ball_in_opponent_half():
-            push_forward_factor = 0.2
-            offensive_x = my_formation_pos[0] + push_forward_factor * (15 - my_formation_pos[0])
-            
-            return (offensive_x, my_formation_pos[1])
-        
-        # Default: stay in formation
-        else:
-            return my_formation_pos
+            return (15, 0)
 
 
     # Keep existing fat proxy methods
