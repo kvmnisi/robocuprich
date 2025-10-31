@@ -337,3 +337,19 @@ class Strategy():
     def is_ball_in_opponent_half(self):
         """Check if ball is in attacking half"""
         return self.ball_2d[0] > 0
+    
+    def assign_dynamic_roles(self):
+        """
+        Decide roles: striker, supporter, defender, etc.
+        Roles depend on ball position and player proximity.
+        """
+        roles = {}
+        if self.am_i_closest_to_ball():
+            roles[self.player_unum] = "striker"
+        elif self.am_i_second_closest_to_ball():
+            roles[self.player_unum] = "support"
+        elif self.is_ball_in_my_half():
+            roles[self.player_unum] = "defense"
+        else:
+            roles[self.player_unum] = "attack"
+        return roles[self.player_unum]
