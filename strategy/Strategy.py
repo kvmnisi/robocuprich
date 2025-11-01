@@ -26,18 +26,8 @@ class Strategy():
                                     for opponent in world.opponents
                                     ]
 
-        # Filter out None values
         self.valid_opponent_positions = [pos for pos in self.opponent_positions if pos is not None]
         self.valid_teammate_positions = [pos for pos in self.teammate_positions if pos is not None]
-
-        self.team_dist_to_ball = None
-        self.team_dist_to_oppGoal = None
-        self.opp_dist_to_ball = None
-
-        self.prev_important_positions_and_values = None
-        self.curr_important_positions_and_values = None
-        self.point_preferences = None
-        self.combined_threat_and_definedPositions = None
 
         self.my_ori = self.robot_model.imu_torso_orientation
         self.ball_2d = world.ball_abs_pos[:2]
@@ -49,7 +39,6 @@ class Strategy():
         self.ball_speed = np.linalg.norm(world.get_ball_abs_vel(6)[:2])
         
         self.goal_dir = M.target_abs_angle(self.ball_2d,(15.05,0))
-
         self.PM_GROUP = world.play_mode_group
 
         self.slow_ball_pos = world.get_predicted_ball_pos(0.5)
@@ -70,19 +59,34 @@ class Strategy():
 
         self.active_player_unum = self.teammates_ball_sq_dist.index(self.min_teammate_ball_sq_dist) + 1
 
-        self.my_desired_position = self.mypos
-        self.my_desired_orientation = self.ball_dir
-
-        # Cache for expensive calculations
         self._distance_cache = {}
 
 
     # ============================================
-    # DISTANCE HELPERS
+    # BASIC HELPERS
     # ============================================
-    
+    def IsFormationReady(self, point_preferences):
+        
+        is_formation_ready = True
+        for i in range(1, 6):
+            if i != self.active_player_unum: 
+                teammate_pos = self.teammate_positions[i-1]
+
+                if not teammate_pos is None:
+
+                    distance = np.sum((teammate_pos - point_preferences[i]) **2)
+                    if(distance > 0.3):
+                        is_formation_ready = False
+
+        return is_formation_ready
+
+    def GetDirectionRelativeToMyPositionAndTarget(self,target):
+        target_vec = target - self.my_head_pos_2d
+        target_dir = M.vector_angle(target_vec)
+
+        return target_dir
     def distance(self, pos1, pos2):
-        """Calculate Euclidean distance between two positions"""
+        """Calculate Euclidean distance"""
         if pos1 is None or pos2 is None:
             return float('inf')
         
@@ -99,97 +103,209 @@ class Strategy():
         
         dist = math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)
         self._distance_cache[cache_key] = dist
-        
         return dist
     
     def distance_squared(self, pos1, pos2):
-        """Calculate squared distance (faster for comparisons)"""
+        """Calculate squared distance"""
         if pos1 is None or pos2 is None:
             return float('inf')
-        
         if len(pos1) > 2:
             pos1 = pos1[:2]
         if len(pos2) > 2:
             pos2 = pos2[:2]
-        
         return (pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2
 
-
-    # ============================================
-    # BALL POSSESSION HELPERS
-    # ============================================
-    
     def am_i_closest_to_ball(self):
-        """Check if I'm the closest teammate to the ball"""
+        """Check if I'm closest to ball"""
         return self.active_player_unum == self.player_unum
     
     def can_i_kick(self):
-        """Check if I'm close enough to kick the ball"""
-        KICK_DISTANCE_SQ = 0.25  # 0.5m squared
+        """Check if close enough to kick"""
+        KICK_DISTANCE_SQ = 0.25
         return self.ball_sq_dist < KICK_DISTANCE_SQ
 
 
     # ============================================
-    # OPPONENT AWARENESS
+    # TIKI-TAKA: DYNAMIC FORMATION
     # ============================================
     
-    def get_closest_opponent_to_ball(self):
-        """Find the closest opponent to the ball"""
-        if not self.opponents_ball_sq_dist:
-            return None, float('inf')
-        
-        min_sq_dist = min(self.opponents_ball_sq_dist)
-        min_index = self.opponents_ball_sq_dist.index(min_sq_dist)
-        
-        closest_opp = self.opponent_positions[min_index]
-        distance = math.sqrt(min_sq_dist)
-        
-        return closest_opp, distance
+    def calculate_tiki_taka_position(self, base_formation_list, my_unum):
+        """
+        Dynamic tiki-taka positioning for 5v5.
+        - Ensures passing options ahead of ball
+        - Encourages overlap (pass-and-go) behavior
+        - Compact and adaptive to ball movement
+        """
+
+        ball = np.array(self.ball_2d)
+        goal = np.array((15, 0))
+        my_base_pos = np.array(base_formation_list[my_unum - 1])
+
+        # --- Determine relative role ---
+        ball_carrier_unum = self.active_player_unum
+        am_i_carrier = (my_unum == ball_carrier_unum)
+
+        # Distance from ball
+        dist_to_ball = self.distance(my_base_pos, ball)
+
+        # --- Base following logic ---
+        # All players follow the ball partially
+        follow_factor_x = 0.3
+        follow_factor_y = 0.5
+        new_pos = np.array([
+            my_base_pos[0] + ball[0] * follow_factor_x,
+            my_base_pos[1] + ball[1] * follow_factor_y
+        ])
+
+        # --- Adjust by role ---
+        if am_i_carrier:
+            # BALL CARRIER stays just behind ball (so they can pass forward)
+            approach_offset = -0.5
+            direction_to_goal = (goal - ball)
+            direction_to_goal /= (np.linalg.norm(direction_to_goal) + 1e-5)
+            new_pos = ball + direction_to_goal * approach_offset
+
+        else:
+            # --- If not the carrier, decide based on geometry relative to ball ---
+            carrier_pos = np.array(self.teammate_positions[ball_carrier_unum - 1])
+
+            if carrier_pos is not None:
+                # Vector from carrier to goal
+                carrier_to_goal = goal - carrier_pos
+                carrier_to_goal /= (np.linalg.norm(carrier_to_goal) + 1e-5)
+
+                # Vector from carrier to me
+                rel_to_carrier = new_pos - carrier_pos
+                rel_dist = np.linalg.norm(rel_to_carrier)
+
+                # --- Case 1: I'm very close to the carrier (likely just passed) ---
+                if rel_dist < 2.0 and carrier_pos[0] < ball[0]:
+                    # Make an overlapping forward run toward goal
+                    overlap_distance = 8.0
+                    new_pos = carrier_pos + carrier_to_goal * overlap_distance
+
+                # --- Case 2: I’m a nearby support option (within 6m) ---
+                elif rel_dist < 6.0:
+                    # Stay slightly diagonal, offering lateral pass
+                    lateral_offset = np.array([-carrier_to_goal[1], carrier_to_goal[0]]) * 1.5
+                    support_offset = carrier_to_goal * 1.5
+                    new_pos = carrier_pos + support_offset + lateral_offset
+
+                # --- Case 3: I’m far from ball (defensive fallback) ---
+                else:
+                    # Maintain base position but slightly move toward ball
+                    new_pos = my_base_pos * 0.7 + ball * 0.3
+
+        # --- Clamp boundaries ---
+        new_pos[0] = np.clip(new_pos[0], -14.5, 14.5)
+        new_pos[1] = np.clip(new_pos[1], -9.5, 9.5)
+        if my_unum == 1:
+            new_pos[0] = min(new_pos[0], -6.0)
+            new_pos[1] = np.clip(new_pos[1], -3.0, 3.0)
+
+
+        # --- Rule: Defensive players stay behind ball ---
+        if my_base_pos[0] < 0:
+            new_pos[0] = min(new_pos[0], ball[0] - 1.0)
+
+        return tuple(new_pos)
+
+
+
+    # ============================================
+    # PASSING LOGIC
+    # ============================================
     
-    def get_closest_opponent_to_position(self, position):
-        """Find closest opponent to a given position"""
-        if not self.valid_opponent_positions:
-            return None, float('inf')
+    def find_best_pass_target(self):
+        """
+        Find best teammate to pass to
         
-        min_dist = float('inf')
-        closest_opp = None
+        Returns:
+            tuple: (teammate_pos, score) or (None, 0) if no good pass
+        """
+        best_target = None
+        best_score = -999
+        opponent_goal = (15, 0)
         
-        for opp_pos in self.valid_opponent_positions:
-            dist = self.distance(position, opp_pos)
-            if dist < min_dist:
-                min_dist = dist
-                closest_opp = opp_pos
+        for i, teammate_pos in enumerate(self.teammate_positions):
+            # Skip self and None positions
+            if teammate_pos is None or i == self.player_unum - 1:
+                continue
+            
+            # Calculate pass distance
+            pass_dist = self.distance(self.ball_2d, teammate_pos)
+            
+            # Skip if too close or too far
+            if pass_dist < 1.0:
+                continue
+            
+            # Check if lane is blocked
+            if self.is_passing_lane_blocked(self.ball_2d, teammate_pos, safety_radius=0.6):
+                continue
+            
+            # Calculate score
+            score = 0
+            
+            # Prefer forward passes
+            forward_progress = teammate_pos[0] - self.ball_2d[0]
+            if forward_progress > 0:
+                score += forward_progress * 30
+            else:
+                score += forward_progress * 5  # Small penalty for backward
+            
+            # Prefer closer to goal
+            dist_to_goal = self.distance(teammate_pos, opponent_goal)
+            score += (30 - dist_to_goal) * 3
+            
+            # Prefer shorter passes (tiki-taka style)
+            if pass_dist <= 7.0:
+                score += 40
+            elif pass_dist <= 6.0:
+                score += 20
+            
+            if score > best_score:
+                best_score = score
+                best_target = teammate_pos
         
-        return closest_opp, min_dist
-    
-    def is_opponent_nearby(self, position, radius=2.0):
-        """Check if any opponent is within radius of position"""
-        radius_sq = radius * radius
-        for opp_pos in self.valid_opponent_positions:
-            if self.distance_squared(position, opp_pos) < radius_sq:
-                return True
+        return best_target, best_score
+
+
+    def should_shoot(self):
+        """
+        Decide if we should shoot at goal
+        
+        Returns:
+            bool: True if should shoot
+        """
+        opponent_goal = (15, 0)
+        dist_to_goal = self.distance(self.ball_2d, opponent_goal)
+        
+        # Only shoot if close enough
+        if dist_to_goal > 10:
+            return False
+        
+        # Shoot if very close
+        if dist_to_goal < 7.0:
+            return True
+        
+        # Shoot if decent angle and not blocked
+        if dist_to_goal < 8.0 and abs(self.ball_2d[1]) < 4.0:
+            # Check if shooting lane is clear
+            opponents_blocking = 0
+            for opp_pos in self.valid_opponent_positions:
+                dist_to_line = self.point_to_line_segment_distance(
+                    opp_pos, self.ball_2d, opponent_goal
+                )
+                if dist_to_line < 1.0:
+                    opponents_blocking += 1
+            
+            return opponents_blocking <= 1
+        
         return False
 
 
     # ============================================
-    # FIELD POSITION HELPERS
-    # ============================================
-    
-    def is_ball_in_my_half(self):
-        """Check if ball is in my defensive half"""
-        return self.ball_2d[0] < 0
-    
-    def is_ball_dangerous(self):
-        """Check if ball is dangerously close to my goal"""
-        return self.ball_2d[0] < -10
-    
-    def is_ball_near_goal(self, goal_x=15, threshold=8):
-        """Check if ball is near opponent's goal"""
-        return self.distance(self.ball_2d, (goal_x, 0)) < threshold
-
-
-    # ============================================
-    # PASSING & GEOMETRY HELPERS
+    # GEOMETRY HELPERS
     # ============================================
     
     def point_to_line_segment_distance(self, point, line_start, line_end):
@@ -212,128 +328,34 @@ class Strategy():
         t = max(0, min(1, t))
         
         closest_point = A + t * AB
-        
         return np.linalg.norm(P - closest_point)
     
-    def is_passing_lane_blocked(self, start_pos, end_pos, safety_radius=0.5):
-        """Check if a passing lane is blocked by opponents"""
+    
+    def is_passing_lane_blocked(self, start_pos, end_pos, safety_radius=0.6):
+        """Check if passing lane is blocked by opponents"""
         for opp_pos in self.valid_opponent_positions:
             dist_to_line = self.point_to_line_segment_distance(opp_pos, start_pos, end_pos)
             if dist_to_line < safety_radius:
                 return True
         return False
     
-    def find_clear_passing_targets(self, max_distance=10, min_forward_progress=2):
-        """Find all teammates with clear passing lanes"""
-        clear_targets = []
-        opponent_goal = (15, 0)
-        
-        for i, teammate_pos in enumerate(self.valid_teammate_positions):
-            unum = i + 1
-            
-            if unum == self.player_unum:
-                continue
-            
-            pass_dist = self.distance(self.mypos, teammate_pos)
-            if pass_dist > max_distance or pass_dist < 1:
-                continue
-            
-            forward_progress = teammate_pos[0] - self.ball_2d[0]
-            if forward_progress < min_forward_progress:
-                continue
-            
-            if not self.is_passing_lane_blocked(self.mypos, teammate_pos):
-                dist_to_goal = self.distance(teammate_pos, opponent_goal)
-                score = (30 - dist_to_goal) + forward_progress
-                clear_targets.append((unum, teammate_pos, score))
-        
-        clear_targets.sort(key=lambda x: x[2], reverse=True)
-        return clear_targets
-
-
-    # ============================================
-    # STRATEGIC DECISIONS
-    # ============================================
     
-    def should_i_shoot(self, shooting_range=8):
-        """Decide if I should shoot at goal"""
-        opponent_goal = (15, 0)
+    def get_closest_opponent_to_ball(self):
+        """Find closest opponent to ball"""
+        if not self.opponents_ball_sq_dist:
+            return None, float('inf')
         
-        if self.distance(self.ball_2d, opponent_goal) > shooting_range:
-            return False
+        min_sq_dist = min(self.opponents_ball_sq_dist)
+        min_index = self.opponents_ball_sq_dist.index(min_sq_dist)
         
-        opponents_in_lane = 0
-        for opp_pos in self.valid_opponent_positions:
-            dist_to_shooting_line = self.point_to_line_segment_distance(
-                opp_pos, self.ball_2d, opponent_goal
-            )
-            if dist_to_shooting_line < 1.5:
-                opponents_in_lane += 1
+        closest_opp = self.opponent_positions[min_index]
+        distance = math.sqrt(min_sq_dist)
         
-        return opponents_in_lane < 2
-    
-    def should_i_pass(self):
-        """Decide if I should pass instead of shooting"""
-        clear_targets = self.find_clear_passing_targets()
-        
-        if len(clear_targets) > 0 and not self.should_i_shoot():
-            return True
-        
-        if self.is_opponent_nearby(self.ball_2d, radius=1.5):
-            return len(clear_targets) > 0
-        
-        return False
-    
-    def get_best_pass_target(self):
-        """Get the best teammate to pass to"""
-        clear_targets = self.find_clear_passing_targets()
-        
-        if clear_targets:
-            best_unum, best_pos, best_score = clear_targets[0]
-            return best_pos, best_unum
-        else:
-            return (15, 0), None
+        return closest_opp, distance
 
-
-    # ============================================
-    # ORIGINAL METHODS
-    # ============================================
-    
-    def GenerateTeamToTargetDistanceArray(self, target, world):
-        for teammate in world.teammates:
-            pass
-    
-    def IsFormationReady(self, point_preferences):
-        """Check if team is in formation"""
-        is_formation_ready = True
-        for i in range(1, 6):
-            if i != self.active_player_unum: 
-                teammate_pos = self.teammate_positions[i-1]
-
-                if not teammate_pos is None:
-                    distance = np.sum((teammate_pos - point_preferences[i]) **2)
-                    if(distance > 0.3):
-                        is_formation_ready = False
-
-        return is_formation_ready
 
     def GetDirectionRelativeToMyPositionAndTarget(self, target):
         """Get direction to target"""
         target_vec = target - self.my_head_pos_2d
         target_dir = M.vector_angle(target_vec)
         return target_dir
-    
-   
-
-    def am_i_second_closest_to_ball(self):
-        """Check if I'm second closest player"""
-        sorted_distances = sorted(enumerate(self.teammates_ball_sq_dist), 
-                                key=lambda x: x[1])
-        if len(sorted_distances) >= 2:
-            second_closest_index = sorted_distances[1][0]
-            return (second_closest_index + 1) == self.player_unum
-        return False
-
-    def is_ball_in_opponent_half(self):
-        """Check if ball is in attacking half"""
-        return self.ball_2d[0] > 0
