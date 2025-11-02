@@ -181,7 +181,7 @@ class Strategy():
                 # --- Case 1: I'm very close to the carrier (likely just passed) ---
                 if rel_dist < 2.0 and carrier_pos[0] < ball[0]:
                     # Make an overlapping forward run toward goal
-                    overlap_distance = 8.0
+                    overlap_distance = 6.0
                     new_pos = carrier_pos + carrier_to_goal * overlap_distance
 
                 # --- Case 2: I’m a nearby support option (within 6m) ---
@@ -194,7 +194,7 @@ class Strategy():
                 # --- Case 3: I’m far from ball (defensive fallback) ---
                 else:
                     # Maintain base position but slightly move toward ball
-                    new_pos = my_base_pos * 0.7 + ball * 0.3
+                    new_pos = my_base_pos * 0.3 + ball * 0.3
 
         # --- Clamp boundaries ---
         new_pos[0] = np.clip(new_pos[0], -14.5, 14.5)
@@ -207,7 +207,7 @@ class Strategy():
         # --- Rule: Defensive players stay behind ball ---
         if my_base_pos[0] < 0:
             new_pos[0] = min(new_pos[0], ball[0] - 1.0)
-
+        
         return tuple(new_pos)
 
 
@@ -240,8 +240,7 @@ class Strategy():
                 continue
             
             # Check if lane is blocked
-            if self.is_passing_lane_blocked(self.ball_2d, teammate_pos, safety_radius=0.6):
-                continue
+            
             
             # Calculate score
             score = 0
@@ -258,7 +257,7 @@ class Strategy():
             score += (30 - dist_to_goal) * 3
             
             # Prefer shorter passes (tiki-taka style)
-            if pass_dist <= 7.0:
+            if pass_dist <= 9.0:
                 score += 40
             elif pass_dist <= 6.0:
                 score += 20

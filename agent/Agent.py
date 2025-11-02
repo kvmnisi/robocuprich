@@ -27,7 +27,7 @@ class Agent(Base_Agent):
         self.fat_proxy_cmd = "" if is_fat_proxy else None
         self.fat_proxy_walk = np.zeros(3)
 
-        self.init_pos = ([-14,0],[-9,-5],[-9,0],[-9,5],[-5,-5],[-5,0],[-5,5],[-1,-6],[-1,-2.5],[-1,2.5],[-1,6])[unum-1]
+        self.init_pos = ([-14,0],[-6, 0],[-2,5],[-2,-4],[-1,-0])[unum-1]
 
 
     def beam(self, avoid_center_circle=False):
@@ -117,10 +117,7 @@ class Agent(Base_Agent):
         elif self.state == 1 or (behavior.is_ready("Get_Up") and self.fat_proxy_cmd is None):
             self.state = 0 if behavior.execute("Get_Up") else 1
         else:
-            if strategyData.play_mode != self.world.M_BEFORE_KICKOFF:
-                self.select_skill(strategyData)
-            else:
-                pass
+            self.select_skill(strategyData)
 
         self.radio.broadcast()
 
@@ -384,22 +381,76 @@ class Agent(Base_Agent):
         
         # OUR KICKOFF
         elif strategyData.play_mode == self.world.M_OUR_KICKOFF:
-            # formation = KickOffFormation()
+            # Define kickoff formation
+            formation  = [
+            (-13, 0),     # Player 1: GK
+            (-6, 0),      # Player 2: Midfielder (center back)
+            (-2, 5),      # Player 3: Left mid
+            (-2, -4),     # Player 4: Right mid
+            (-1, 0)     # Player 5: Striker (top of diamond)
+            ]
+            
+            # Use role assignment for kickoff positions
+            from strategy.Assignment import role_assignment
+            point_preferences = role_assignment(strategyData.teammate_positions, formation)
+            
+            # Update my assigned position
+            strategyData.my_desired_position = point_preferences[strategyData.player_unum]
+            strategyData.my_desired_orientation = 180 if strategyData.am_i_closest_to_ball() else 0
+            
+            # Visualize assignment
+            drawer.line(strategyData.mypos, strategyData.my_desired_position, 2, 
+                        drawer.Color.blue, "kickoff_assignment")
+            
+            # Check if formation is ready
+            if not strategyData.IsFormationReady(point_preferences):
+                # Still getting into position
+                drawer.annotation((0, 10.5), "KICKOFF SETUP", drawer.Color.yellow, "status")
+                
+                # Player taking kickoff faces own goal
+                orientation = 180 if strategyData.am_i_closest_to_ball() else 0
+                
+                return self.move(
+                    target_2d=strategyData.my_desired_position,
+                    orientation=orientation
+                )
+            
+            # Formation is ready - execute kickoff
             if strategyData.am_i_closest_to_ball():
+                drawer.annotation((0, 10.5), "KICKOFF!", drawer.Color.green, "status")
+                
                 if strategyData.can_i_kick():
-                    # Kick forward to start play
-                    return self.kickTarget(strategyData, mypos, (-5, 0))
+                    # Find player at position (-2, 0) from point_preferences
+                    backward_pass_target = None
+                    for unum, pos in point_preferences.items():
+                        # Find midfielder behind me (around x=-2)
+                        if pos[0] < -1.5 and pos[0] > -3.0 and abs(pos[1]) < 1.0:
+                            # Get actual position of that player
+                            backward_pass_target = strategyData.teammate_positions[unum - 1]
+                            break
+                    
+                    # Default to fixed position if not found
+                    if backward_pass_target is None:
+                        backward_pass_target = (-2, 0)
+                    
+                    drawer.annotation(strategyData.ball_2d, "BACKWARD PASS", drawer.Color.green, "kickoff_pass")
+                    drawer.line(strategyData.ball_2d, backward_pass_target, 3, drawer.Color.green, "kickoff_line")
+                    
+                    return self.kickTarget(strategyData, mypos, backward_pass_target)
                 else:
-                    return self.move(target_2d=ball, orientation=strategyData.ball_dir)
+                    # Move to ball, face own goal
+                    return self.move(target_2d=ball, orientation=180)
             else:
-                # Spread out for kickoff
-                formation = GenerateBasicFormation(strategyData.ball_2d)
-                target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
-                return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
+                # Wait in position for kickoff pass
+                drawer.annotation((0, 10.5), "READY FOR KICKOFF", drawer.Color.cyan, "status")
+                return self.move(
+                    target_2d=strategyData.my_desired_position,
+                    orientation=0  # Face forward to receive
+                )
         
         # THEIR KICKOFF - Get in defensive positions
         elif strategyData.play_mode == self.world.M_THEIR_KICKOFF:
-            formation = GenerateBasicFormation(strategyData.ball_2d)
+            formation = KickOffFormation()
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
             # Stay more defensive during opponent kickoff
             target_pos = (target_pos[0] - 2.0, target_pos[1])
@@ -509,7 +560,7 @@ class Agent(Base_Agent):
         elif strategyData.play_mode in [self.world.M_THEIR_FREE_KICK, self.world.M_THEIR_DIR_FREE_KICK]:
             # Basic defensive positioning
             formation = GenerateBasicFormation(strategyData.ball_2d)
-            target_pos = strategyData.calculate_tiki_taka_position(self,formation, strategyData.player_unum)
+            target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
             return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
         # OFFSIDE - Wait for restart

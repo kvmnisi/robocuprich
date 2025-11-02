@@ -48,7 +48,7 @@ def GenerateBasicFormation(ball_pos = None):
         width = 1.0
     else:
         shift_x = 0
-        width = 0.7
+        width = 1.0
     
     for i in range(2, len(formation)):
         formation[i][0] += shift_x
@@ -57,12 +57,12 @@ def GenerateBasicFormation(ball_pos = None):
 
 
 def KickOffFormation():
-    formation =  [
+    formation = [
         np.array([-13, 0]),    # Goalkeeper
-         np.array([-6, -3]),  # Left Defender
-         np.array([-2, -2]),   # Right Defender
-         np.array([-2, 2]),    # Forward Left
-         np.array([-3, 0])      # Forward Right
-     ]
+        np.array([-5, 0]),  # CB
+        np.array([-2, -5]),   # Right Defender
+        np.array([-2, 4]),    # Forward Left
+        np.array([-1, 0])      # Forward Right
+            ]
     
     return formation
