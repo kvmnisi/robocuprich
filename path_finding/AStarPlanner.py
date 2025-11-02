@@ -1,240 +1,323 @@
-import math
-import heapq
-from typing import List, Tuple, Optional
+"""
+A*-based calculate_tiki_taka_position()
 
-class AStarPlanner:
-    """A* path planner for navigating around opponents"""
+Replaces your current positioning logic with A* search that finds
+optimal position based on:
+- Pass availability from ball carrier
+- Goal threat
+- Opponent spacing
+- Teammate spacing
+"""
+
+import heapq
+import numpy as np
+import math
+
+
+def astarcalculate_tiki_taka_position(self, base_formation_list, my_unum):
+    """
+    A* SEARCH for optimal off-ball positioning
     
-    def __init__(self, field_width=30, field_height=20, grid_resolution=0.5):
-        """
-        Args:
-            field_width: Field width in meters (default: 30m, -15 to 15)
-            field_height: Field height in meters (default: 20m, -10 to 10)
-            grid_resolution: Size of each grid cell in meters
-        """
-        self.field_width = field_width
-        self.field_height = field_height
-        self.resolution = grid_resolution
-        
-        # Grid dimensions
-        self.grid_width = int(field_width / grid_resolution)
-        self.grid_height = int(field_height / grid_resolution)
-        
-        # Obstacle inflation radius (make obstacles appear larger for safety)
-        self.robot_radius = 0.3  # meters
-        self.obstacle_inflation = 0.5  # extra safety margin
-        
-    def world_to_grid(self, pos):
+    Finds best position considering:
+    1. Pass availability (2-7m from ball carrier)
+    2. Forward progress (closer to goal)
+    3. Space from opponents (not crowded)
+    4. Spacing from teammates (avoid clustering)
+    5. Good passing angles
+    
+    Args:
+        base_formation_list: List of base formation positions
+        my_unum: My player number (1-5)
+    
+    Returns:
+        tuple: (x, y) optimal position
+    """
+    
+    # ========================================
+    # GOALKEEPER: No A*, fixed positioning
+    # ========================================
+    if my_unum == 1:
+        ball_x = self.ball_2d[0]
+        if ball_x < -5:
+            gk_x = -13.0
+        elif ball_x < 0:
+            gk_x = -11.0
+        else:
+            gk_x = -9.0
+        gk_y = np.clip(self.ball_2d[1] * 0.3, -2.5, 2.5)
+        return (gk_x, gk_y)
+    
+    # ========================================
+    # BALL CARRIER: Stay just behind ball
+    # ========================================
+    ball = np.array(self.ball_2d)
+    goal = np.array((15, 0))
+    ball_carrier_unum = self.active_player_unum
+    am_i_carrier = (my_unum == ball_carrier_unum)
+    
+    if am_i_carrier:
+        # Ball carrier doesn't need A*, just position to pass/shoot
+        direction_to_goal = goal - ball
+        direction_to_goal /= (np.linalg.norm(direction_to_goal) + 1e-5)
+        carrier_pos = ball - direction_to_goal * 0.5
+        carrier_pos[0] = np.clip(carrier_pos[0], -14.5, 14.5)
+        carrier_pos[1] = np.clip(carrier_pos[1], -9.5, 9.5)
+        return tuple(carrier_pos)
+    
+    # ========================================
+    # OFF-BALL: Use A* to find optimal position
+    # ========================================
+    
+    my_base_pos = np.array(base_formation_list[my_unum - 1])
+    carrier_pos = np.array(self.teammate_positions[ball_carrier_unum - 1]) if ball_carrier_unum else ball
+    
+    # Grid parameters
+    GRID_SIZE = 1.0  # 1 meter resolution
+    SEARCH_RADIUS = 8.0  # Search within 8m of base position
+    
+    # Define search space around base position
+    min_x = max(-14.5, my_base_pos[0] - SEARCH_RADIUS)
+    max_x = min(14.5, my_base_pos[0] + SEARCH_RADIUS)
+    min_y = max(-9.5, my_base_pos[1] - SEARCH_RADIUS)
+    max_y = min(9.5, my_base_pos[1] + SEARCH_RADIUS)
+    
+    def world_to_grid(pos):
         """Convert world coordinates to grid indices"""
-        # World: x in [-15, 15], y in [-10, 10]
-        # Grid: indices [0, grid_width), [0, grid_height)
-        grid_x = int((pos[0] + 15) / self.resolution)
-        grid_y = int((pos[1] + 10) / self.resolution)
-        
-        # Clamp to valid range
-        grid_x = max(0, min(self.grid_width - 1, grid_x))
-        grid_y = max(0, min(self.grid_height - 1, grid_y))
-        
-        return (grid_x, grid_y)
+        gx = int((pos[0] - min_x) / GRID_SIZE)
+        gy = int((pos[1] - min_y) / GRID_SIZE)
+        return (gx, gy)
     
-    def grid_to_world(self, grid_pos):
-        """Convert grid indices to world coordinates"""
-        world_x = grid_pos[0] * self.resolution - 15
-        world_y = grid_pos[1] * self.resolution - 10
-        return (world_x, world_y)
+    def grid_to_world(grid_pos):
+        """Convert grid to world coordinates"""
+        wx = grid_pos[0] * GRID_SIZE + min_x
+        wy = grid_pos[1] * GRID_SIZE + min_y
+        return np.array([wx, wy])
     
-    def create_obstacle_grid(self, obstacles, aggressive_mode=False):
+    def calculate_position_score(world_pos):
         """
-        Create a binary obstacle grid
+        Score a position (LOWER = BETTER for A*)
         
-        Args:
-            obstacles: List of (x, y) positions of obstacles (opponents/teammates)
-            aggressive_mode: If True, reduce safety margins
+        Factors:
+        1. Distance from carrier (ideal 3-7m)
+        2. Distance to goal (closer = better)
+        3. Opponent proximity (space = better)
+        4. Teammate spacing (avoid clustering)
+        5. Passing angle quality
         """
-        grid = [[0 for _ in range(self.grid_height)] for _ in range(self.grid_width)]
+        score = 0
         
-        inflation = self.obstacle_inflation if not aggressive_mode else 0.2
+        # Factor 1: Distance from ball carrier
+        dist_to_carrier = np.linalg.norm(world_pos - carrier_pos)
         
-        for obstacle in obstacles:
-            obs_grid = self.world_to_grid(obstacle)
+        if dist_to_carrier < 2.0:
+            score += 50  # Too close
+        elif 3.0 <= dist_to_carrier <= 7.0:
+            score += (dist_to_carrier - 5.0) ** 2  # Slight preference for ~5m
+        else:
+            score += (dist_to_carrier - 7.0) * 5  # Penalty for being too far
+        
+        # Factor 2: Distance to goal (forward progress)
+        dist_to_goal = np.linalg.norm(world_pos - goal)
+        score += dist_to_goal * 2.0
+        
+        # Factor 3: Opponent proximity
+        min_opp_dist = float('inf')
+        for opp_pos in self.valid_opponent_positions:
+            if opp_pos is not None:
+                opp_dist = self.distance(world_pos, opp_pos)
+                min_opp_dist = min(min_opp_dist, opp_dist)
+        
+        if min_opp_dist < 1.5:
+            score += 40  # Very crowded
+        elif min_opp_dist < 2.5:
+            score += 15  # Somewhat crowded
+        # Good spacing: no penalty
+        
+        # Factor 4: Teammate spacing (avoid clustering)
+        for teammate_pos in self.valid_teammate_positions:
+            if teammate_pos is not None:
+                teammate_dist = self.distance(world_pos, teammate_pos)
+                if teammate_dist < 2.0:
+                    score += 25  # Too close to teammate
+                elif teammate_dist < 3.0:
+                    score += 10  # Slightly close
+        
+        # Factor 5: Passing angle quality
+        carrier_to_me = world_pos - carrier_pos
+        carrier_to_goal = goal - carrier_pos
+        
+        if np.linalg.norm(carrier_to_me) > 0.1 and np.linalg.norm(carrier_to_goal) > 0.1:
+            carrier_to_me_norm = carrier_to_me / np.linalg.norm(carrier_to_me)
+            carrier_to_goal_norm = carrier_to_goal / np.linalg.norm(carrier_to_goal)
             
-            # Inflate obstacle (mark nearby cells as occupied)
-            inflation_cells = int(inflation / self.resolution)
+            # Dot product: 1 = same direction, -1 = opposite
+            angle_quality = np.dot(carrier_to_me_norm, carrier_to_goal_norm)
             
-            for dx in range(-inflation_cells, inflation_cells + 1):
-                for dy in range(-inflation_cells, inflation_cells + 1):
-                    nx = obs_grid[0] + dx
-                    ny = obs_grid[1] + dy
-                    
-                    # Check if within grid bounds
-                    if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
-                        # Check if within circular radius
-                        dist = math.sqrt(dx**2 + dy**2) * self.resolution
-                        if dist <= inflation + self.robot_radius:
-                            grid[nx][ny] = 1  # Mark as obstacle
+            if angle_quality > 0:
+                score -= angle_quality * 15  # Reward forward angles
+            else:
+                score += abs(angle_quality) * 8  # Penalty for backward
         
-        return grid
+        # Factor 6: Width (prefer some lateral spacing)
+        lateral_dist = abs(world_pos[1] - carrier_pos[1])
+        if 2.0 <= lateral_dist <= 5.0:
+            score -= 8  # Good width
+        
+        return score
     
-    def heuristic(self, pos1, pos2):
-        """Euclidean distance heuristic"""
-        return math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)
+    # ========================================
+    # A* SEARCH
+    # ========================================
     
-    def get_neighbors(self, pos, grid):
-        """Get valid neighboring cells (8-connected grid)"""
-        neighbors = []
+    start_grid = world_to_grid(my_base_pos)
+    
+    open_set = []
+    start_world = grid_to_world(start_grid)
+    start_score = calculate_position_score(start_world)
+    heapq.heappush(open_set, (start_score, start_grid))
+    
+    came_from = {}
+    g_score = {start_grid: 0}
+    f_score = {start_grid: start_score}
+    
+    best_pos = start_world
+    best_score = start_score
+    
+    closed_set = set()
+    MAX_ITERATIONS = 150  # Limit for performance
+    iterations = 0
+    
+    # 8-directional movement
+    directions = [
+        (0, 1), (0, -1), (1, 0), (-1, 0),
+        (1, 1), (1, -1), (-1, 1), (-1, -1)
+    ]
+    
+    while open_set and iterations < MAX_ITERATIONS:
+        iterations += 1
         
-        # 8 directions: N, S, E, W, NE, NW, SE, SW
-        directions = [
-            (0, 1), (0, -1), (1, 0), (-1, 0),  # Cardinal
-            (1, 1), (1, -1), (-1, 1), (-1, -1)  # Diagonal
-        ]
+        current_f, current_grid = heapq.heappop(open_set)
+        current_world = grid_to_world(current_grid)
         
+        # Track best position
+        current_score = calculate_position_score(current_world)
+        if current_score < best_score:
+            best_score = current_score
+            best_pos = current_world
+        
+        # Early termination if excellent position found
+        if current_score < 5:
+            best_pos = current_world
+            break
+        
+        closed_set.add(current_grid)
+        
+        # Explore neighbors
         for dx, dy in directions:
-            nx = pos[0] + dx
-            ny = pos[1] + dy
+            neighbor_grid = (current_grid[0] + dx, current_grid[1] + dy)
+            
+            if neighbor_grid in closed_set:
+                continue
+            
+            neighbor_world = grid_to_world(neighbor_grid)
             
             # Check bounds
-            if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
-                # Check if not obstacle
-                if grid[nx][ny] == 0:
-                    # Cost is higher for diagonal moves
-                    cost = 1.414 if dx != 0 and dy != 0 else 1.0
-                    neighbors.append(((nx, ny), cost))
-        
-        return neighbors
-    
-    def reconstruct_path(self, came_from, start, goal):
-        """Reconstruct path from start to goal using came_from dict"""
-        path = []
-        current = goal
-        
-        while current != start:
-            path.append(current)
-            current = came_from.get(current)
-            if current is None:
-                return []  # Path reconstruction failed
-        
-        path.append(start)
-        path.reverse()
-        
-        # Convert to world coordinates
-        world_path = [self.grid_to_world(p) for p in path]
-        
-        return world_path
-    
-    def smooth_path(self, path):
-        """Smooth path by removing unnecessary waypoints"""
-        if len(path) <= 2:
-            return path
-        
-        smoothed = [path[0]]
-        
-        i = 0
-        while i < len(path) - 1:
-            # Look ahead to find furthest visible point
-            for j in range(len(path) - 1, i, -1):
-                if self.is_line_clear(path[i], path[j]):
-                    smoothed.append(path[j])
-                    i = j
-                    break
-            else:
-                i += 1
-        
-        return smoothed
-    
-    def is_line_clear(self, p1, p2):
-        """Check if line between two points is obstacle-free (simplified)"""
-        # For now, assume clear. You can add line-obstacle intersection checks
-        return True
-    
-    def plan_path(self, start_pos, goal_pos, obstacles, aggressive_mode=False, max_iterations=1000):
-        """
-        Plan path using A* algorithm
-        
-        Args:
-            start_pos: (x, y) starting position in world coordinates
-            goal_pos: (x, y) goal position in world coordinates
-            obstacles: List of (x, y) obstacle positions
-            aggressive_mode: If True, reduce safety margins
-            max_iterations: Maximum search iterations
-            
-        Returns:
-            path: List of (x, y) waypoints in world coordinates
-            success: Boolean indicating if path was found
-        """
-        # Convert to grid coordinates
-        start_grid = self.world_to_grid(start_pos)
-        goal_grid = self.world_to_grid(goal_pos)
-        
-        # Create obstacle grid
-        grid = self.create_obstacle_grid(obstacles, aggressive_mode)
-        
-        # Check if start or goal is in obstacle
-        if grid[start_grid[0]][start_grid[1]] == 1:
-            return [goal_pos], False  # Can't plan from obstacle, return direct path
-        
-        if grid[goal_grid[0]][goal_grid[1]] == 1:
-            # Goal is blocked, find nearest free cell
-            goal_grid = self.find_nearest_free_cell(goal_grid, grid)
-        
-        # A* algorithm
-        open_set = []
-        heapq.heappush(open_set, (0, start_grid))
-        
-        came_from = {}
-        g_score = {start_grid: 0}
-        f_score = {start_grid: self.heuristic(start_grid, goal_grid)}
-        
-        closed_set = set()
-        iterations = 0
-        
-        while open_set and iterations < max_iterations:
-            iterations += 1
-            
-            current_f, current = heapq.heappop(open_set)
-            
-            if current == goal_grid:
-                # Path found!
-                path = self.reconstruct_path(came_from, start_grid, goal_grid)
-                smoothed_path = self.smooth_path(path)
-                return smoothed_path, True
-            
-            closed_set.add(current)
-            
-            for neighbor, move_cost in self.get_neighbors(current, grid):
-                if neighbor in closed_set:
-                    continue
-                
-                tentative_g = g_score[current] + move_cost
-                
-                if neighbor not in g_score or tentative_g < g_score[neighbor]:
-                    came_from[neighbor] = current
-                    g_score[neighbor] = tentative_g
-                    f_score[neighbor] = tentative_g + self.heuristic(neighbor, goal_grid)
-                    
-                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
-        
-        # No path found, return direct path
-        return [start_pos, goal_pos], False
-    
-    def find_nearest_free_cell(self, pos, grid):
-        """Find nearest unoccupied cell to given position"""
-        visited = set()
-        queue = [pos]
-        
-        while queue:
-            current = queue.pop(0)
-            
-            if current in visited:
+            if not (-14.5 <= neighbor_world[0] <= 14.5 and 
+                    -9.5 <= neighbor_world[1] <= 9.5):
                 continue
-            visited.add(current)
             
-            if grid[current[0]][current[1]] == 0:
-                return current
+            # Movement cost (diagonal = 1.414, straight = 1.0)
+            move_cost = 1.414 if dx != 0 and dy != 0 else 1.0
+            tentative_g = g_score[current_grid] + move_cost
             
-            # Add neighbors
-            for (nx, ny), _ in self.get_neighbors(current, [[0]*self.grid_height for _ in range(self.grid_width)]):
-                if (nx, ny) not in visited:
-                    queue.append((nx, ny))
+            if neighbor_grid not in g_score or tentative_g < g_score[neighbor_grid]:
+                came_from[neighbor_grid] = current_grid
+                g_score[neighbor_grid] = tentative_g
+                
+                h_score = calculate_position_score(neighbor_world)
+                f_score[neighbor_grid] = tentative_g + h_score
+                
+                heapq.heappush(open_set, (f_score[neighbor_grid], neighbor_grid))
+    
+    # ========================================
+    # POST-PROCESSING
+    # ========================================
+    
+    # Ensure defensive players stay behind ball
+    if my_base_pos[0] < 0:
+        best_pos[0] = min(best_pos[0], ball[0] - 1.0)
+    
+    # Final bounds check
+    best_pos[0] = np.clip(best_pos[0], -14.5, 14.5)
+    best_pos[1] = np.clip(best_pos[1], -9.5, 9.5)
+    
+    return tuple(best_pos)
+
+
+def astarfind_best_pass_target(self):
+    """
+    A*-INSPIRED pass selection
+    
+    Evaluates each teammate with:
+    - Pass difficulty (cost)
+    - Position value (heuristic)
+    
+    Returns:
+        tuple: (target_pos, score)
+    """
+    best_target = None
+    best_score = float('inf')  # Lower is better
+    opponent_goal = (15, 0)
+    
+    for i, teammate_pos in enumerate(self.teammate_positions):
+        if teammate_pos is None or i == self.player_unum - 1:
+            continue
         
-        return pos  # Fallback
+        # ===== COST (g): Pass Difficulty =====
+        pass_dist = self.distance(self.ball_2d, teammate_pos)
+        
+        # Distance cost
+        if pass_dist < 1.5:
+            pass_difficulty = 100  # Too close
+        elif 2.0 <= pass_dist <= 5.0:
+            pass_difficulty = pass_dist * 2
+        elif pass_dist <= 8.0:
+            pass_difficulty = 10 + (pass_dist - 5) * 5
+        else:
+            pass_difficulty = 200  # Too far
+        
+        # Lane blockage cost
+        for opp_pos in self.valid_opponent_positions:
+            if opp_pos is not None:
+                line_dist = self.point_to_line_segment_distance(
+                    opp_pos, self.ball_2d, teammate_pos
+                )
+                if line_dist < 0.5:
+                    pass_difficulty += 40
+                elif line_dist < 1.0:
+                    pass_difficulty += 20
+                elif line_dist < 1.5:
+                    pass_difficulty += 5
+        
+        # ===== HEURISTIC (h): Position Value =====
+        dist_to_goal = self.distance(teammate_pos, opponent_goal)
+        position_value = dist_to_goal * 3
+        
+        # Central positions bonus
+        if abs(teammate_pos[1]) < 3.0:
+            position_value -= 10
+        
+        # Forward positions bonus
+        if teammate_pos[0] > 8:
+            position_value -= 15
+        elif teammate_pos[0] > 0:
+            position_value -= 5
+        
+        # ===== A* SCORE: g + h =====
+        total_score = pass_difficulty + position_value
+        
+        if total_score < best_score:
+            best_score = total_score
+            best_target = teammate_pos
+    
+    return best_target, best_score

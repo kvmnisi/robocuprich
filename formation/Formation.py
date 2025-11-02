@@ -1,6 +1,6 @@
 import numpy as np
 
-def GenerateBasicFormation():
+def GenerateBasicFormation(ball_pos = None):
 
 
     #  formation = [
@@ -13,8 +13,8 @@ def GenerateBasicFormation():
     formation = [
         np.array([-13, 0]),    # Goalkeeper
          np.array([-3, 0]),  # CB
-         np.array([8, -3]),   # Right Defender
-         np.array([8, 3]),    # Forward Left
+         np.array([8, -8]),   # Right Defender
+         np.array([8, 8]),    # Forward Left
          np.array([12, 0])      # Forward Right
      ]
     
@@ -39,7 +39,20 @@ def GenerateBasicFormation():
     #     np.array([9, 1]),    # Forward Left
     #     np.array([12, 0])      # Forward Right
     # ]
-
+    diski = ball_pos[0]
+    if -15<= diski < - 5:
+        shift_x = -3.0
+        width = 0.3
+    elif -5 <= diski <=5:
+        shift_x = -1.5
+        width = 1.0
+    else:
+        shift_x = 0
+        width = 0.7
+    
+    for i in range(2, len(formation)):
+        formation[i][0] += shift_x
+        formation[i][1] *= width
     return formation
 
 

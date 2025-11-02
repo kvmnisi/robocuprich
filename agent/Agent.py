@@ -220,7 +220,7 @@ class Agent(Base_Agent):
         # ROLE ASSIGNMENT PHASE
         # ========================================
         # Get base formation
-        formation_positions = GenerateBasicFormation()
+        formation_positions = GenerateBasicFormation(strategyData.ball_2d)
         
         # Calculate dynamic formation (moves with ball)
         dynamic_formation = []
@@ -393,13 +393,13 @@ class Agent(Base_Agent):
                     return self.move(target_2d=ball, orientation=strategyData.ball_dir)
             else:
                 # Spread out for kickoff
-                formation = GenerateBasicFormation()
+                formation = GenerateBasicFormation(strategyData.ball_2d)
                 target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
                 return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
         # THEIR KICKOFF - Get in defensive positions
         elif strategyData.play_mode == self.world.M_THEIR_KICKOFF:
-            formation = GenerateBasicFormation()
+            formation = GenerateBasicFormation(strategyData.ball_2d)
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
             # Stay more defensive during opponent kickoff
             target_pos = (target_pos[0] - 2.0, target_pos[1])
@@ -420,13 +420,13 @@ class Agent(Base_Agent):
                     return self.move(target_2d=ball, orientation=strategyData.ball_dir)
             else:
                 # Get open for pass
-                formation = GenerateBasicFormation()
+                formation = GenerateBasicFormation(strategyData.ball_2d)
                 target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
                 return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
         # THEIR KICK-IN - Mark opponents
         elif strategyData.play_mode == self.world.M_THEIR_KICK_IN:
-            formation = GenerateBasicFormation()
+            formation = GenerateBasicFormation(strategyData.ball_2d)
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
             return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
@@ -443,7 +443,7 @@ class Agent(Base_Agent):
                 if strategyData.player_unum in [4, 5]:  # Attackers go to goal area
                     target_pos = (10, 2 if strategyData.player_unum == 4 else -2)
                 else:  # Others stay back
-                    formation = GenerateBasicFormation()
+                    formation = GenerateBasicFormation(strategyData.ball_2d)
                     target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
                 return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
@@ -474,13 +474,13 @@ class Agent(Base_Agent):
                     return self.move(target_2d=ball, orientation=strategyData.ball_dir)
             else:
                 # Spread out for pass
-                formation = GenerateBasicFormation()
+                formation = GenerateBasicFormation(strategyData.ball_2d)
                 target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
                 return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
         # THEIR GOAL KICK - Push up
         elif strategyData.play_mode == self.world.M_THEIR_GOAL_KICK:
-            formation = GenerateBasicFormation()
+            formation = GenerateBasicFormation(strategyData.ball_2d)
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
             # Push forward during opponent goal kick
             target_pos = (target_pos[0] + 2.0, target_pos[1])
@@ -491,30 +491,30 @@ class Agent(Base_Agent):
             if strategyData.am_i_closest_to_ball():
                 if strategyData.can_i_kick():
                     # Quick free kick
-                    targets = strategyData.find_best_pass_target()
-                    if targets:
-                        _, pass_pos, _, _ = targets[0]
-                        return self.kickTarget(strategyData, mypos, pass_pos)
+                    pass_target, pass_score = strategyData.find_best_pass_target()
+                    if pass_target is not None:
+                        
+                        return self.kickTarget(strategyData, mypos, pass_target)
                     else:
                         return self.kickTarget(strategyData, mypos, (ball[0] + 3, ball[1]))
                 else:
                     return self.move(target_2d=ball, orientation=strategyData.ball_dir)
             else:
                 # Get open for pass
-                formation = GenerateBasicFormation()
+                formation = GenerateBasicFormation(strategyData.ball_2d)
                 target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
                 return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
         # THEIR FREE KICK - Form defensive wall
         elif strategyData.play_mode in [self.world.M_THEIR_FREE_KICK, self.world.M_THEIR_DIR_FREE_KICK]:
             # Basic defensive positioning
-            formation = GenerateBasicFormation()
-            target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
+            formation = GenerateBasicFormation(strategyData.ball_2d)
+            target_pos = strategyData.calculate_tiki_taka_position(self,formation, strategyData.player_unum)
             return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
         # OFFSIDE - Wait for restart
         elif strategyData.play_mode in [self.world.M_OUR_OFFSIDE, self.world.M_THEIR_OFFSIDE]:
-            formation = GenerateBasicFormation()
+            formation = GenerateBasicFormation(strategyData.ball_2d)
             target_pos = formation[strategyData.player_unum - 1]
             return self.move(target_2d=target_pos, orientation=0)
         
@@ -525,13 +525,13 @@ class Agent(Base_Agent):
         # OUR GOAL / THEIR GOAL - Beam to positions
         elif strategyData.play_mode in [self.world.M_OUR_GOAL, self.world.M_THEIR_GOAL]:
             # Use beam for goal situations (handled in think_and_send)
-            formation = GenerateBasicFormation()
+            formation = GenerateBasicFormation(strategyData.ball_2d)
             target_pos = formation[strategyData.player_unum - 1]
             return self.move(target_2d=target_pos, orientation=0)
         
         # Default fallback - use formation
         else:
-            formation = GenerateBasicFormation()
+            formation = GenerateBasicFormation(strategyData.ball_2d)
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
             return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
 
