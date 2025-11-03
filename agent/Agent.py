@@ -330,7 +330,7 @@ class Agent(Base_Agent):
                     orientation=0 
                 )
         
-        # THEIR KICKOFF - Stay Put Untiil Opponent makes a move
+        # THEIR KICKOFF - Stay Put Until Opponent makes a move
         elif strategyData.play_mode == self.world.M_THEIR_KICKOFF:
             formation  = [
             (-13, 0),     # Player 1: GK
@@ -465,7 +465,7 @@ class Agent(Base_Agent):
                 target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
                 return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
-        # THEIR FREE KICK - Form defensive wall
+        
         elif strategyData.play_mode in [self.world.M_THEIR_FREE_KICK, self.world.M_THEIR_DIR_FREE_KICK]:
             # Basic defensive positioning
             formation = Vala(strategyData.ball_2d)
@@ -489,7 +489,7 @@ class Agent(Base_Agent):
             target_pos = formation[strategyData.player_unum - 1]
             return self.move(target_2d=target_pos, orientation=0)
         
-        # Default fallback - use formation
+        
         else:
             formation = GenerateBasicFormation(strategyData.ball_2d)
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
