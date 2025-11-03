@@ -121,91 +121,11 @@ class Strategy():
     
     def can_i_kick(self):
         """Check if close enough to kick"""
-        KICK_DISTANCE_SQ = 0.25
+        KICK_DISTANCE_SQ = 0.45
         return self.ball_sq_dist < KICK_DISTANCE_SQ
 
 
-    # ============================================
-    # TIKI-TAKA: DYNAMIC FORMATION
-    # ============================================
     
-    # def calculate_tiki_taka_position(self, base_formation_list, my_unum):
-    #     """
-    #     Dynamic tiki-taka positioning for 5v5.
-    #     - Ensures passing options ahead of ball
-    #     - Encourages overlap (pass-and-go) behavior
-    #     - Compact and adaptive to ball movement
-    #     """
-
-    #     ball = np.array(self.ball_2d)
-    #     goal = np.array((15, 0))
-    #     my_base_pos = np.array(base_formation_list[my_unum - 1])
-    #     # --- Determine relative role ---
-    #     ball_carrier_unum = self.active_player_unum
-    #     am_i_carrier = (my_unum == ball_carrier_unum)
-
-    #     # Distance from ball
-    #     dist_to_ball = self.distance(my_base_pos, ball)
-
-    #     zonefactor = np.clip(self.ball_2d[0]/15.0, -1.0, 1.0)
-    #     follow_factor_x = 0.5 - 0.25 * zonefactor
-    #     follow_factor_y = 0.2 - 0.1 * zonefactor
-    #     new_pos = np.array([
-    #         my_base_pos[0] + ball[0] * follow_factor_x,
-    #         my_base_pos[1] + ball[1] * follow_factor_y
-    #     ])
-
-    #     # --- Adjust by role ---
-    #     if am_i_carrier:
-    #         # BALL CARRIER stays just behind ball (so they can pass forward)
-    #         # approach_offset = -0.5
-    #         # direction_to_goal = (goal - ball)
-    #         # direction_to_goal /= (np.linalg.norm(direction_to_goal) + 1e-5)
-    #         # new_pos = ball + direction_to_goal * approach_offset
-    #         return tuple(ball)
-    #     else:
-    #         # --- If not the carrier, decide based on geometry relative to ball ---
-    #         carrier_pos = np.array(self.teammate_positions[ball_carrier_unum - 1])
-
-    #         if carrier_pos is not None:
-    #             # Vector from carrier to goal
-    #             carrier_to_goal = goal - carrier_pos
-    #             carrier_to_goal /= (np.linalg.norm(carrier_to_goal) + 1e-5)
-
-    #             # Vector from carrier to me
-    #             rel_to_carrier = new_pos - carrier_pos
-    #             rel_dist = np.linalg.norm(rel_to_carrier)
-
-    #             # --- Case 1: I'm very close to the carrier (likely just passed) ---
-    #             if rel_dist < 2.0 and carrier_pos[0] < ball[0]:
-    #                 # Make an overlapping forward run toward goal
-    #                 overlap_distance = 8.0
-    #                 new_pos = carrier_pos + carrier_to_goal * overlap_distance
-
-    #             # --- Case 2: I’m a nearby support option (within 6m) ---
-    #             elif rel_dist < 6.0:
-    #                 # Stay slightly diagonal, offering lateral pass
-    #                 lateral_offset = np.array([-carrier_to_goal[1], carrier_to_goal[0]]) * 1.5
-    #                 support_offset = carrier_to_goal * 1.5
-    #                 new_pos = carrier_pos + support_offset + lateral_offset
-
-    #             # --- Case 3: I’m far from ball (defensive fallback) ---
-    #             else:
-    #                 # Maintain base position but slightly move toward ball
-    #                 new_pos = my_base_pos * 0.7 + ball * 0.3
-
-    #     # --- Clamp boundaries ---
-    #     new_pos[0] = np.clip(new_pos[0], -14.5, 14.5)
-    #     new_pos[1] = np.clip(new_pos[1], -9.5, 9.5)
-    #     if my_unum == 1:
-    #         new_pos[0] = np.clip(new_pos[0], -14.5, -12.0)
-    #         new_pos[1] = np.clip(new_pos[1], -2.5, 2.5)
-
-    #     # --- Rule: Defensive players stay behind ball ---
-    #     if my_base_pos[0] < 0:
-    #         new_pos[0] = min(new_pos[0], ball[0] - 1.0)
-
-    #     return tuple(new_pos)
 
     def calculate_tiki_taka_position(self, base_formation_list, my_unum):
         """
@@ -250,7 +170,7 @@ class Strategy():
 
         elif my_unum == 3:  # RIGHT MIDFIELDER (wide)
             
-            follow_factor_x = 0.5
+            follow_factor_x = 0.7
             follow_factor_y = 0.4
             new_pos = np.array([
                 my_base_pos[0] + ball[0] * follow_factor_x,
@@ -268,19 +188,19 @@ class Strategy():
                 my_base_pos[1] + ball[1] * follow_factor_y  # narrower than RM
             ])
             
-            #Drop back slightly in defence
+            
             if ball[0] < 0:
                 new_pos[0] -= 5.0
 
         elif my_unum == 5:  # STRIKER
             # Stay slightly ahead of ball; lead attack
             new_pos = np.array([
-                ball[0] + 2.5,
+                np.clip(ball[0] + 5, -5, 14.0),
                 np.clip(ball[1] * 0.3, -2, 2)
             ])
             # In defensive half: stay near halfway for outlet
-            # if ball[0] < 0:
-            #     new_pos[0] = max(ball[0] + 5, -2)
+            if ball[0] < 0:
+                new_pos[0] = max(ball[0] + 5, -2)
 
         # --- Ball carrier behaviour ---
         if am_i_carrier:
@@ -302,11 +222,6 @@ class Strategy():
 
         return tuple(new_pos)
 
-
-    # ============================================
-    # PASSING LOGIC
-    # ============================================
-    
     def find_best_pass_target(self):
         """
         Find best teammate to pass to
@@ -344,11 +259,6 @@ class Strategy():
             else:
                 score += forward_progress * 5  # Small penalty for backward
             
-            # Prefer closer to goal
-            # dist_to_goal = self.distance(teammate_pos, opponent_goal)
-            # score += (30 - dist_to_goal) * 3
-            
-            # Prefer shorter passes (tiki-taka style)
             if pass_dist <= 5.0:
                 score += 50
             elif pass_dist >5.0:
@@ -443,23 +353,5 @@ class Strategy():
         distance = math.sqrt(min_sq_dist)
         
         return closest_opp, distance
-
-
-    def GetDirectionRelativeToMyPositionAndTarget(self, target):
-        """Get direction to target"""
-        target_vec = target - self.my_head_pos_2d
-        target_dir = M.vector_angle(target_vec)
-        return target_dir
-    
-    def adjust_position_to_carrier(self, position, carrier_pos, max_distance):
-        """Optimized version using squared distance"""
-        if carrier_pos is not None:
-            dist = self.distance(position, carrier_pos)
-            if dist > max_distance:
-                dist = math.sqrt(dist)
-                direction = (carrier_pos - position) / (dist + 1e-5)
-                position += direction * (dist - max_distance)
-        
-        return position
     
     
