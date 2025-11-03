@@ -141,6 +141,9 @@ class Strategy():
         goal = np.array((15, 0))
         my_base_pos = np.array(base_formation_list[my_unum - 1])
 
+
+        
+
         # --- Determine relative role ---
         ball_carrier_unum = self.active_player_unum
         am_i_carrier = (my_unum == ball_carrier_unum)
@@ -199,7 +202,9 @@ class Strategy():
         # --- Clamp boundaries ---
         new_pos[0] = np.clip(new_pos[0], -14.5, 14.5)
         new_pos[1] = np.clip(new_pos[1], -9.5, 9.5)
-
+        if my_unum == 1:
+            new_pos[0] = np.clip(new_pos[0], -14.5, -11.0)
+            new_pos[1] = np.clip(new_pos[1], -2.5, 2.5)
 
         # --- Rule: Defensive players stay behind ball ---
         if my_base_pos[0] < 0:

@@ -450,10 +450,15 @@ class Agent(Base_Agent):
         
         # THEIR KICKOFF - Get in defensive positions
         elif strategyData.play_mode == self.world.M_THEIR_KICKOFF:
-            formation = KickOffFormation()
+            formation  = [
+            (-13, 0),     # Player 1: GK
+            (-6, 0),      # Player 2: Midfielder (center back)
+            (-2, 5),      # Player 3: Left mid
+            (-2, -4),     # Player 4: Right mid
+            (-1, 0)     # Player 5: Striker (top of diamond)
+            ]
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
-            # Stay more defensive during opponent kickoff
-            target_pos = (target_pos[0] - 2.0, target_pos[1])
+            
             return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
         # OUR KICK-IN

@@ -13,9 +13,9 @@ def GenerateBasicFormation(ball_pos = None):
     formation = [
         np.array([-13, 0]),    # Goalkeeper
          np.array([-3, 0]),  # CB
-         np.array([8, -8]),   # Right Defender
-         np.array([8, 8]),    # Forward Left
-         np.array([12, 0])      # Forward Right
+         np.array([8, -4]),   # rm
+         np.array([8, 5]),    #  LM
+         np.array([12, 0])      # ST
      ]
     
     # return {
