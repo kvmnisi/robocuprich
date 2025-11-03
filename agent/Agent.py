@@ -27,7 +27,7 @@ class Agent(Base_Agent):
         self.fat_proxy_cmd = "" if is_fat_proxy else None
         self.fat_proxy_walk = np.zeros(3)
 
-        self.init_pos = ([-14,0],[-6, 0],[-2,5],[-2,-4],[-1,-0])[unum-1]
+        self.init_pos = ([-14,0],[-6, 0],[-2,5],[-1,-0], [-2, -4])[unum-1]
 
 
     def beam(self, avoid_center_circle=False):
@@ -386,8 +386,8 @@ class Agent(Base_Agent):
             (-13, 0),     # Player 1: GK
             (-6, 0),      # Player 2: Midfielder (center back)
             (-2, 5),      # Player 3: Left mid
-            (-2, -4),     # Player 4: Right mid
-            (-1, 0)     # Player 5: Striker (top of diamond)
+            (-1, 0),     # RM AT CENTRE
+            (-2, -4),     # STRIKER AT RIGHT MID
             ]
             
             # Use role assignment for kickoff positions
