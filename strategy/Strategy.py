@@ -170,7 +170,7 @@ class Strategy():
 
         elif my_unum == 3:  # RIGHT MIDFIELDER (wide)
             
-            follow_factor_x = 0.7
+            follow_factor_x = 0.2
             follow_factor_y = 0.4
             new_pos = np.array([
                 my_base_pos[0] + ball[0] * follow_factor_x,
@@ -181,7 +181,7 @@ class Strategy():
                 new_pos[0] -= 2.5
 
         elif my_unum == 4:  # LEFT MIDFIELDER (central supporter)
-            follow_factor_x = 0.6
+            follow_factor_x = 0.2
             follow_factor_y = 0.35
             new_pos = np.array([
                 my_base_pos[0] + ball[0] * follow_factor_x,
@@ -200,7 +200,7 @@ class Strategy():
             ])
             # In defensive half: stay near halfway for outlet
             if ball[0] < 0:
-                new_pos[0] = max(ball[0] + 5, -2)
+                new_pos[0] = max(ball[0] + 5, -8)
 
         # --- Ball carrier behaviour ---
         if am_i_carrier:
@@ -231,7 +231,25 @@ class Strategy():
         """
         best_target = None
         best_score = -999
-        opponent_goal = (15, 0)
+
+        #Skop Die Bal Tactic
+        ball = np.array(self.ball_2d)
+        look_ahead = np.array([ball[0] + 3.0, ball[1]])
+        lane_clear = not self.is_passing_lane_blocked(ball, look_ahead, 0.8)
+        free_space_ahead = True
+
+        
+        for opp in self.valid_opponent_positions:
+            if self.distance(ball, opp) < 3.5 and abs(opp[1] - ball[1]) < 2.0 and opp[0] > ball[0]:
+                free_space_ahead = False
+                break
+        
+
+        if lane_clear and free_space_ahead:
+            target_forward = (ball[0] + 3.0, ball[1])
+            return target_forward, 999 
+        
+        
         
         for i, teammate_pos in enumerate(self.teammate_positions):
             # Skip self and None positions
@@ -270,7 +288,7 @@ class Strategy():
         
         return best_target, best_score
 
-
+    
     def should_shoot(self):
         """
         Decide if we should shoot at goal
