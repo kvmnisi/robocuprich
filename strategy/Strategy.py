@@ -174,7 +174,7 @@ class Strategy():
             follow_factor_y = 0.4
             new_pos = np.array([
                 my_base_pos[0] + ball[0] * follow_factor_x,
-                my_base_pos[1] + ball[1] * follow_factor_y  # stay wide right
+                my_base_pos[1] + ball[1] * follow_factor_y
             ])
             # Drop back slightly if ball in own half
             if ball[0] < 0:
