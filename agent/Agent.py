@@ -8,6 +8,7 @@ from strategy.Strategy import Strategy
 
 from formation.Formation import GenerateBasicFormation
 from formation.Formation import KickOffFormation
+from formation.Formation import Vala
 
 
 class Agent(Base_Agent):
@@ -128,94 +129,13 @@ class Agent(Base_Agent):
             self.fat_proxy_cmd = ""
 
 
-    # def select_skill(self, strategyData):
-    #     """
-    #     Tiki-Taka main decision function
-        
-    #     Priority order:
-    #     1. Get the ball (highest priority!)
-    #     2. Maintain compact shape around ball
-    #     3. Create passing opportunities
-    #     """
-    #     drawer = self.world.draw
-        
-    #     # ========================================
-    #     # PHASE 0: Handle Special Game Modes
-    #     # ========================================
-    #     if not self.is_play_on_mode(strategyData):
-    #         return self.handle_special_game_modes(strategyData)
-        
-    #     # ========================================
-    #     # PHASE 1: BALL IS PRIORITY #1
-    #     # ========================================
-    #     # Always check ball possession first!
-        
-    #     if strategyData.am_i_closest_to_ball():
-    #         # I'M THE BALL CARRIER - Execute tiki-taka!
-    #         drawer.annotation((0, 10.5), "⚽ BALL CARRIER", drawer.Color.red, "status")
-    #         return self.execute_tiki_taka_possession(strategyData)
-        
-    #     # ========================================
-    #     # PHASE 2: Support Ball Carrier (Dynamic Formation)
-    #     # ========================================
-    #     # Not on ball, so position in dynamic formation
-        
-    #     # Get base formation shape
-    #     base_formation = GenerateBasicFormation()
-        
-    #     # Calculate position that MOVES WITH THE BALL
-    #     my_dynamic_position = strategyData.calculate_tiki_taka_position(
-    #         base_formation, 
-    #         strategyData.player_unum
-    #     )
-        
-    #     # Visualize dynamic formation
-    #     drawer.circle(my_dynamic_position, 0.3, 2, drawer.Color.blue, False, 
-    #                 f"formation_{strategyData.player_unum}")
-    #     drawer.line(strategyData.mypos, my_dynamic_position, 1, drawer.Color.blue,
-    #             f"formation_line_{strategyData.player_unum}")
-        
-    #     # Show my role
-    #     ball_dist = strategyData.distance(strategyData.mypos, strategyData.ball_2d)
-    #     if ball_dist < 4.0:
-    #         role = "CLOSE SUPPORT"
-    #         color = drawer.Color.orange
-    #     elif ball_dist < 7.0:
-    #         role = "MID SUPPORT"
-    #         color = drawer.Color.yellow
-    #     else:
-    #         role = "DEFENSIVE"
-    #         color = drawer.Color.blue
-        
-    #     drawer.annotation(strategyData.mypos, role, color, 
-    #                     f"role_{strategyData.player_unum}")
-        
-    #     # Move to dynamic position, facing ball
-    #     return self.move(
-    #         target_2d=my_dynamic_position,
-    #         orientation=strategyData.ball_dir,
-    #         is_orientation_absolute=True,
-    #         avoid_obstacles=True,
-    #         is_aggressive=False
-    #     )
-
     def select_skill(self, strategyData):
-        """
-        TIKI-TAKA with ROLE ASSIGNMENT
         
-        Flow:
-        1. Active player attacks ball
-        2. Others use role assignment for positioning
-        """
         drawer = self.world.draw
         
         # Handle non-play-on modes
         if not self.is_play_on_mode(strategyData):
             return self.handle_all_play_modes(strategyData)
-        
-        # ========================================
-        # ROLE ASSIGNMENT PHASE
-        # ========================================
         # Get base formation
         formation_positions = GenerateBasicFormation(strategyData.ball_2d)
         
@@ -225,21 +145,15 @@ class Agent(Base_Agent):
             dynamic_pos = strategyData.calculate_tiki_taka_position(formation_positions, unum)
             dynamic_formation.append(dynamic_pos)
         
-        # Use role assignment to match players to dynamic positions
-        
         point_preferences = role_assignment(strategyData.teammate_positions, dynamic_formation)
-        
-        # Update my desired position
+
         strategyData.my_desired_position = point_preferences[strategyData.player_unum]
         strategyData.my_desired_orientation = strategyData.GetDirectionRelativeToMyPositionAndTarget(
             strategyData.my_desired_position
         )
-        
-        # Visualize assignment
+
         drawer.line(strategyData.mypos, strategyData.my_desired_position, 2, 
                     drawer.Color.blue, "target_line")
-        # drawer.circle(strategyData.my_desired_position, 0.4, 2, drawer.Color.blue, False,
-        #             f"assigned_pos_{strategyData.player_unum}")
         
         # ========================================
         # PHASE 1: Am I attacking the ball?
@@ -249,19 +163,19 @@ class Agent(Base_Agent):
             drawer.annotation(strategyData.mypos, "⚽ ATTACKER", drawer.Color.red, 
                             f"role_{strategyData.player_unum}")
             
-            # Can I kick NOW?
+            
             if strategyData.can_i_kick():
                 drawer.annotation((0, 10.5), "KICKING", drawer.Color.yellow, "status")
                 
-                # Make smart kick decision
+                
                 kick_target = self.kick_decision(strategyData, drawer)
                 
-                # KICK!
+                
                 return self.kickTarget(strategyData, strategyData.mypos, kick_target)
             
             else:
                 # Chase ball
-                drawer.annotation((0, 10.5), "CHASING BALL", drawer.Color.orange, "status")
+                drawer.annotation((0, 30.5), "CHASING BALL", drawer.Color.orange, "status")
                 drawer.clear("kick_info")
                 
                 return self.move(
@@ -283,7 +197,7 @@ class Agent(Base_Agent):
                 role = "SUPPORT"
                 color = drawer.Color.orange
             else:
-                role = "DEFEND"
+                role = "FAR"
                 color = drawer.Color.blue
             
             drawer.annotation(strategyData.mypos, role, color, 
@@ -297,7 +211,6 @@ class Agent(Base_Agent):
                     orientation=strategyData.my_desired_orientation
                 )
             
-            # Move to assigned position, face ball
             return self.move(
                 target_2d=strategyData.my_desired_position,
                 orientation=strategyData.ball_dir,  # Face ball for quick reaction
@@ -333,7 +246,7 @@ class Agent(Base_Agent):
             return tuple(pass_target)
         
         # No good options - just kick forward
-        forward_target = np.array([strategyData.ball_2d[0] + 5, strategyData.ball_2d[1]])
+        forward_target = np.array([strategyData.ball_2d[0] + 10, strategyData.ball_2d[1]])
         drawer.annotation(strategyData.ball_2d, "CLEAR", drawer.Color.yellow, "kick_info")
         drawer.line(strategyData.ball_2d, forward_target, 3, drawer.Color.yellow, "kick_line")
         return tuple(forward_target)
@@ -342,24 +255,9 @@ class Agent(Base_Agent):
     # ========================================
     # GAME MODE HANDLERS - SIMPLIFIED
     # ========================================
-
-    def is_play_on_mode(self, strategyData):
-        """Check if in play on mode"""
-        return strategyData.play_mode == self.world.M_PLAY_ON
-
-
-    
-
-    # ========================================
-    # GAME MODE HANDLERS (Tiki-Taka Style)
-    # ========================================
-
     def is_play_on_mode(self, strategyData):
         """Check if in regular play"""
         return strategyData.play_mode == self.world.M_PLAY_ON
-
-
-    
 
     def handle_all_play_modes(self, strategyData):
         """
@@ -432,7 +330,7 @@ class Agent(Base_Agent):
                     orientation=0 
                 )
         
-        # THEIR KICKOFF - Get in defensive positions
+        # THEIR KICKOFF - Stay Put Untiil Opponent makes a move
         elif strategyData.play_mode == self.world.M_THEIR_KICKOFF:
             formation  = [
             (-13, 0),     # Player 1: GK
@@ -442,30 +340,55 @@ class Agent(Base_Agent):
             (-4, 0)     # Player 5: Striker (top of diamond)
             ]
         
-        # OUR KICK-IN
-        elif strategyData.play_mode == self.world.M_OUR_KICK_IN:
-            if strategyData.am_i_closest_to_ball():
-                if strategyData.can_i_kick():
-                    # Pass to nearest teammate
-                    targets = strategyData.find_best_pass_target()
-                    if targets:
-                        _, pass_pos, _, _ = targets[0]
-                        return self.kickTarget(strategyData, mypos, pass_pos)
-                    else:
-                        return self.kickTarget(strategyData, mypos, (ball[0] + 3, ball[1]))
-                else:
-                    return self.move(target_2d=ball, orientation=strategyData.ball_dir)
-            else:
-                # Get open for pass
-                formation = GenerateBasicFormation(strategyData.ball_2d)
-                target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
-                return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
-        # THEIR KICK-IN - Mark opponents
         elif strategyData.play_mode == self.world.M_THEIR_KICK_IN:
-            formation = GenerateBasicFormation(strategyData.ball_2d)
-            target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
-            return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
+            formation  = Vala(strategyData.ball_2d)
+        
+       
+        elif strategyData.play_mode == self.world.M_OUR_KICK_IN:
+            
+            formation  = GenerateBasicFormation(strategyData.ball_2d)
+            
+            from strategy.Assignment import role_assignment
+            point_preferences = role_assignment(strategyData.teammate_positions, formation)
+            
+            # Update my assigned position
+            strategyData.my_desired_position = point_preferences[strategyData.player_unum]
+            strategyData.my_desired_orientation = 180 if strategyData.am_i_closest_to_ball() else 0
+            
+            # Visualize assignment
+            drawer.line(strategyData.mypos, strategyData.my_desired_position, 2, 
+                        drawer.Color.blue, "kickoff_assignment")
+            
+            # Check if formation is ready
+            if not strategyData.IsFormationReady(point_preferences):
+                # Still getting into position
+                drawer.annotation((0, 10.5), "KICKOFF SETUP", drawer.Color.yellow, "status")
+                
+                # Player taking kickoff faces own goal
+                orientation = 0
+                
+                return self.move(
+                    target_2d=strategyData.my_desired_position,
+                    orientation=orientation
+                )
+            
+            # Formation is ready - execute kickoff
+            if strategyData.am_i_closest_to_ball():
+                drawer.annotation((0, 10.5), "KICKOFF!", drawer.Color.green, "status")
+                
+                if strategyData.can_i_kick():
+                    target = (15.0 , 0.0)  # Kick towards opponent goal
+                    return self.kickTarget(strategyData, mypos, target)
+                else:
+                    return self.move(target_2d=ball, orientation=0)
+            else:
+                # Wait in position for kickoff pass
+                drawer.annotation((0, 10.5), "READY FOR KICKOFF", drawer.Color.cyan, "status")
+                return self.move(
+                    target_2d=strategyData.my_desired_position,
+                    orientation=0 
+                )
         
         # OUR CORNER KICK
         elif strategyData.play_mode == self.world.M_OUR_CORNER_KICK:
@@ -510,16 +433,16 @@ class Agent(Base_Agent):
                 else:
                     return self.move(target_2d=ball, orientation=strategyData.ball_dir)
             else:
-                # Spread out for pass
-                formation = GenerateBasicFormation(strategyData.ball_2d)
+                
+                formation = Vala(strategyData.ball_2d)
                 target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
                 return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
-        # THEIR GOAL KICK - Push up
+        
         elif strategyData.play_mode == self.world.M_THEIR_GOAL_KICK:
             formation = GenerateBasicFormation(strategyData.ball_2d)
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
-            # Push forward during opponent goal kick
+            
             target_pos = (target_pos[0] + 2.0, target_pos[1])
             return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
@@ -545,7 +468,7 @@ class Agent(Base_Agent):
         # THEIR FREE KICK - Form defensive wall
         elif strategyData.play_mode in [self.world.M_THEIR_FREE_KICK, self.world.M_THEIR_DIR_FREE_KICK]:
             # Basic defensive positioning
-            formation = GenerateBasicFormation(strategyData.ball_2d)
+            formation = Vala(strategyData.ball_2d)
             target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
             return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
