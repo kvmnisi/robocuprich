@@ -137,7 +137,6 @@ class Strategy():
         """
 
         ball = np.array(self.ball_2d)
-        goal = np.array((15, 0))   # attacking direction (our goal at -15)
         my_base_pos = np.array(base_formation_list[my_unum - 1])
 
         # Determine active player (closest to ball)
@@ -152,16 +151,12 @@ class Strategy():
             my_base_pos[0] + ball[0] * follow_factor_x,
             my_base_pos[1] + ball[1] * follow_factor_y
         ])
-        carrier_pos = None
-        if ball_carrier_unum and 1 <= ball_carrier_unum <= len(self.teammate_positions):
-
-            carrier_pos = np.array(self.teammate_positions[ball_carrier_unum - 1])
-        # --- Role-dependent behaviour ---
+        
         if my_unum == 1:  # GOALKEEPER
             new_pos = np.array([-14, 0])
-            if ball[0] > -10:
+            if ball[0] > -11:
                 new_pos[0] = -13
-                new_pos[1] = np.clip(ball[1] * 0.4, -2, 2)
+                new_pos[1] = np.clip(ball[1] * 0.4, -1, 1)
 
         elif my_unum == 2:  # CENTRE BACK
             # Stay behind ball and centralize
@@ -176,9 +171,7 @@ class Strategy():
                 my_base_pos[0] + ball[0] * follow_factor_x,
                 my_base_pos[1] + ball[1] * follow_factor_y
             ])
-            # Drop back slightly if ball in own half
-            if ball[0] < 0:
-                new_pos[0] -= 2.5
+            
 
         elif my_unum == 4:  # LEFT MIDFIELDER (central supporter)
             follow_factor_x = 0.2
@@ -187,10 +180,6 @@ class Strategy():
                 my_base_pos[0] + ball[0] * follow_factor_x,
                 my_base_pos[1] + ball[1] * follow_factor_y  # narrower than RM
             ])
-            
-            
-            if ball[0] < 0:
-                new_pos[0] -= 5.0
 
         elif my_unum == 5:  # STRIKER
             # Stay slightly ahead of ball; lead attack
@@ -202,12 +191,11 @@ class Strategy():
             if ball[0] < 0:
                 new_pos[0] = max(ball[0] + 5, -8)
 
-        # --- Ball carrier behaviour ---
+        
         if am_i_carrier:
-            # Striker or midfielder currently with the ball stays close to it
             return tuple(ball)
 
-        # --- Clamp field boundaries ---
+        
         new_pos[0] = np.clip(new_pos[0], -14.5, 14.5)
         new_pos[1] = np.clip(new_pos[1], -9.5, 9.5)
 
@@ -215,8 +203,6 @@ class Strategy():
         if my_unum == 1:
             new_pos[0] = np.clip(new_pos[0], -14.5, -11.0)
             new_pos[1] = np.clip(new_pos[1], -2.5, 2.5)
-
-        # Defensive players stay behind ball
         if my_base_pos[0] < 0:
             new_pos[0] = min(new_pos[0], ball[0] - 1.0)
 
@@ -249,8 +235,6 @@ class Strategy():
             target_forward = (ball[0] + 3.0, ball[1])
             return target_forward, 999 
         
-        
-        
         for i, teammate_pos in enumerate(self.teammate_positions):
             # Skip self and None positions
             if teammate_pos is None or i == self.player_unum - 1:
@@ -262,8 +246,6 @@ class Strategy():
             # Skip if too close
             if pass_dist < 2.0:
                 continue
-            
-            # Check if lane is blocked
             if self.is_passing_lane_blocked(self.ball_2d, teammate_pos, safety_radius=0.6):
                 continue
             
@@ -298,28 +280,9 @@ class Strategy():
         """
         opponent_goal = (15, 0)
         dist_to_goal = self.distance(self.ball_2d, opponent_goal)
-        
-        # Only shoot if close enough
-        if dist_to_goal > 10:
-            return False
-        
         # Shoot if very close
         if dist_to_goal < 7.0:
             return True
-        
-        # Shoot if decent angle and not blocked
-        if dist_to_goal < 8.0 and abs(self.ball_2d[1]) < 4.0:
-            # Check if shooting lane is clear
-            opponents_blocking = 0
-            for opp_pos in self.valid_opponent_positions:
-                dist_to_line = self.point_to_line_segment_distance(
-                    opp_pos, self.ball_2d, opponent_goal
-                )
-                if dist_to_line < 1.0:
-                    opponents_blocking += 1
-            
-            return opponents_blocking <= 1
-        
         return False
 
 

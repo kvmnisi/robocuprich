@@ -27,7 +27,7 @@ class Agent(Base_Agent):
         self.fat_proxy_cmd = "" if is_fat_proxy else None
         self.fat_proxy_walk = np.zeros(3)
 
-        self.init_pos = ([-14,0],[-6, 0],[-2,5],[-1,-0], [-2, -4])[unum-1]
+        self.init_pos = ([-14,0],[-1, 0],[-2,5],[-1,-4], [-2, -1])[unum-1]
 
 
     def beam(self, avoid_center_circle=False):
@@ -384,10 +384,10 @@ class Agent(Base_Agent):
             # Define kickoff formation
             formation  = [
             (-13, 0),     # Player 1: GK
-            (-6, 0),      # Player 2: Midfielder (center back)
+            (-1, 0),      # Player 2:  (center back) to kick
             (-2, 5),      # Player 3: Left mid
-            (-1, 0),     # RM AT CENTRE
-            (-2, -4),     # STRIKER AT RIGHT MID
+            (-1, -4),     # RM
+            (-1, -1.5),     # STRIKER 
             ]
             
             # Use role assignment for kickoff positions
@@ -408,7 +408,7 @@ class Agent(Base_Agent):
                 drawer.annotation((0, 10.5), "KICKOFF SETUP", drawer.Color.yellow, "status")
                 
                 # Player taking kickoff faces own goal
-                orientation = 180 if strategyData.am_i_closest_to_ball() else 0
+                orientation = 0
                 
                 return self.move(
                     target_2d=strategyData.my_desired_position,
@@ -420,46 +420,27 @@ class Agent(Base_Agent):
                 drawer.annotation((0, 10.5), "KICKOFF!", drawer.Color.green, "status")
                 
                 if strategyData.can_i_kick():
-                    # Find player at position (-2, 0) from point_preferences
-                    backward_pass_target = None
-                    for unum, pos in point_preferences.items():
-                        # Find midfielder behind me (around x=-2)
-                        if pos[0] < -1.5 and pos[0] > -3.0 and abs(pos[1]) < 1.0:
-                            # Get actual position of that player
-                            backward_pass_target = strategyData.teammate_positions[unum - 1]
-                            break
-                    
-                    # Default to fixed position if not found
-                    if backward_pass_target is None:
-                        backward_pass_target = (-2, 0)
-                    
-                    drawer.annotation(strategyData.ball_2d, "BACKWARD PASS", drawer.Color.green, "kickoff_pass")
-                    drawer.line(strategyData.ball_2d, backward_pass_target, 3, drawer.Color.green, "kickoff_line")
-                    
-                    return self.kickTarget(strategyData, mypos, backward_pass_target)
+                    target = (15.0 , 0.0)  # Kick towards opponent goal
+                    return self.kickTarget(strategyData, mypos, target)
                 else:
-                    # Move to ball, face own goal
-                    return self.move(target_2d=ball, orientation=180)
+                    return self.move(target_2d=ball, orientation=0)
             else:
                 # Wait in position for kickoff pass
                 drawer.annotation((0, 10.5), "READY FOR KICKOFF", drawer.Color.cyan, "status")
                 return self.move(
                     target_2d=strategyData.my_desired_position,
-                    orientation=0  # Face forward to receive
+                    orientation=0 
                 )
         
         # THEIR KICKOFF - Get in defensive positions
         elif strategyData.play_mode == self.world.M_THEIR_KICKOFF:
             formation  = [
             (-13, 0),     # Player 1: GK
-            (-6, 0),      # Player 2: Midfielder (center back)
+            (-8, 0),      # Player 2: Midfielder (center back)
             (-2, 5),      # Player 3: Left mid
             (-2, -4),     # Player 4: Right mid
-            (-1, 0)     # Player 5: Striker (top of diamond)
+            (-4, 0)     # Player 5: Striker (top of diamond)
             ]
-            target_pos = strategyData.calculate_tiki_taka_position(formation, strategyData.player_unum)
-            
-            return self.move(target_2d=target_pos, orientation=strategyData.ball_dir)
         
         # OUR KICK-IN
         elif strategyData.play_mode == self.world.M_OUR_KICK_IN:

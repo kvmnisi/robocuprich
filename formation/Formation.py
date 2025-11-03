@@ -14,10 +14,21 @@ def GenerateBasicFormation(ball_pos = None):
 def KickOffFormation():
     formation = [
         np.array([-13, 0]),    # Goalkeeper
-        np.array([-5, 0]),  # CB
+        np.array([-1, 0]),  # CB
         np.array([-2, 5]),   # Right Defender
-        np.array([-2, -4]),    # Forward Left
-        np.array([-1, 0])      # Forward Right
+        np.array([-1, -4]),    # Forward Left
+        np.array([-2, -1])      # Forward Right
+            ]
+    
+    return formation
+
+def Vala():
+    formation = [
+        np.array([-13, 0]),    # Goalkeeper
+        np.array([-1, 0]),  # CB
+        np.array([-2, 5]),   # Right Defender
+        np.array([-1, -4]),    # Forward Left
+        np.array([-2, -1])      # Forward Right
             ]
     
     return formation
